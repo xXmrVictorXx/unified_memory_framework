@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "deep-research": {
+      "source": "modelscope.cn",
+      "sourceType": "well-known",
+      "computedHash": "20bb9466001d96ec2cad7f6e52e71d5474a90274ae40b24cad5a0c42fb4ebc2b"
+    }
+  }
+}

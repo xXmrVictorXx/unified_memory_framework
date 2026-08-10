@@ -1,0 +1,559 @@
+% =========================================================================
+% 通用 EQA 记忆框架 - 文献库
+% Survey bibliography for "General Memory Framework for Embodied QA"
+%
+% 组织方式：按记忆模块类别分组（便于写 Related Work 时按主题检索）
+% 每条目含 fusion= 标签注明其记忆融合模式
+%
+% 核实状态：
+%   [verified]   = arXiv ID 已通过 DBLP/arXiv 核实
+%   [unverified] = 未找到 arXiv，用 venue/DOI 引用，需查原文确认
+%
+% 累计论文：~55 篇（去重后）
+% =========================================================================
+
+
+% #########################################################################
+% ## A. EQA 基础与经典工作
+% #########################################################################
+
+@inproceedings{das2018eqa,
+  title     = {Embodied Question Answering},
+  author    = {Das, Abhishek and Datta, Samyak and Gkioxari, Georgia and
+               Lee, Stefan and Parikh, Devi and Batra, Dhruv},
+  booktitle = {Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year      = {2018},
+  note      = {Oral. [verified] 原始EQA奠基. fusion=WM+EM},
+  eprint    = {1711.11543},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{fang2019smt,
+  title     = {Scene Memory Transformer for Embodied Agents in Long-Horizon Tasks},
+  author    = {Fang, Kuan and Toshev, Alexander and Fei-Fei, Li and Savarese, Silvio},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  pages     = {538--547},
+  year      = {2019},
+  note      = {[verified] SMT, 自注意力情景记忆. fusion=WM+EM},
+  eprint    = {1903.03878},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{datta2022emqa,
+  title     = {Episodic Memory Question Answering},
+  author    = {Datta, Samyak and Dharur, Sameer},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year      = {2022},
+  note      = {[verified] EMQA, episode视频记忆基准. fusion=EM},
+  eprint    = {2205.01652},
+  archivePrefix = {arXiv},
+}
+
+
+% #########################################################################
+% ## B. EQA 基准与评估
+% #########################################################################
+
+@inproceedings{majumdar2024openeqa,
+  title     = {{OpenEQA}: Embodied Question Answering in the Era of Foundation Models},
+  author    = {Majumdar, Arjun and Ajay, Anurag and Zhang, Xiaohan and
+               Putta, Pranav and Yenamandra, Sriram and Henaff, Mikael and
+               Silwal, Sneha and McVay, Paul and Maksymets, Oleksandr and
+               Yadav, Karmesh and Berg-Kirkpatrick, Taylor and
+               Rajeswaran, Abhishek and Meier, Franziska},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year      = {2024},
+  note      = {[verified] OpenEQA benchmark (EM-EQA / A-EQA). fusion=EM. arXiv ID 2408.12282 (DBLP-indexed; 2406.09701 可能是早期版本)},
+  eprint    = {2408.12282},
+  archivePrefix = {arXiv},
+}
+
+
+% #########################################################################
+% ## C. 空间-几何记忆 (Spatial-Geometric)
+% #########################################################################
+
+@inproceedings{ren2024exploreeqa,
+  title     = {Explore until Confident: Efficient Exploration for Embodied Question Answering},
+  author    = {Ren, Allen Z. and others},
+  booktitle = {Robotics: Science and Systems (RSS)},
+  year      = {2024},
+  note      = {[verified] 2D占用图 + 保形预测停止. fusion=GM},
+  eprint    = {2403.15941},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{zhang2026fasteqa,
+  title     = {{FAST-EQA}: Efficient Embodied Question Answering with Global and Local Region Relevancy},
+  author    = {Zhang, Hangil and others},
+  booktitle = {Proceedings of the IEEE/CVF Winter Conference on Applications of Computer Vision (WACV)},
+  year      = {2026},
+  note      = {[verified] per-target 2D特征图缓存. fusion=WM+GM+EM},
+  eprint    = {2602.15813},
+  archivePrefix = {arXiv},
+}
+
+@article{ruan2025bscnav,
+  title   = {From Reactive to Cognitive: Brain-Inspired Spatial Intelligence for Embodied Agents},
+  author  = {Ruan, Shuai and Su, Hao and others},
+  year    = {2025},
+  note    = {[verified] BSC-Nav, cognitive map + 好奇心驱动. fusion=WM+GM},
+  eprint  = {2508.17198},
+  archivePrefix = {arXiv},
+}
+
+
+% #########################################################################
+% ## D. 场景图 / 对象-关系记忆 (Scene Graph)
+% #########################################################################
+
+@inproceedings{hughes2022hydra,
+  title     = {Hydra: A Real-time Spatial Perception System for 3D Scene Graph Construction and Optimization},
+  author    = {Hughes, Nathan and Chang, Yun and Carlone, Luca},
+  booktitle = {Robotics: Science and Systems (RSS)},
+  year      = {2022},
+  note      = {[verified] 5层实时场景图(基础工作). fusion=SG+GM. 注: 会议为RSS 2022, 非RAL},
+  eprint    = {2201.13360},
+  archivePrefix = {arXiv},
+}
+
+@article{gu2023conceptgraphs,
+  title   = {{ConceptGraphs}: Open-Vocabulary 3D Scene Graphs for Perception and Planning},
+  author  = {Gu, Qiao and Kuwajerwala, Alihusein and Morin, Sacha and
+             Jatavallabhula, Krishna Murthy and Sen, Bipasha and
+             Agarwal, Abhijit and Rivera, Christopher E. and Paull, Liam},
+  year    = {2023},
+  note    = {[verified] 开放词表3D场景图(基础). RSS 2024. fusion=SG+GM. 注: 一作Qiao Gu, 非Rosen},
+  eprint  = {2309.16650},
+  archivePrefix = {arXiv},
+  primaryClass = {cs.CV},
+}
+
+@inproceedings{werby2024hovsg,
+  title     = {Hierarchical Open-Vocabulary 3D Scene Graphs for Language-Grounded Robot Navigation},
+  author    = {Werby, Abdelrhman and Huang, Chenguang and B{\"u}chner, Martin and Valada, Abhinav and Burgard, Wolfram},
+  booktitle = {Robotics: Science and Systems (RSS)},
+  year      = {2024},
+  note      = {[verified] HOV-SG, 4层层级开放词表SG. fusion=SG+GM},
+  eprint    = {2403.17846},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{saxena2025grapheqa,
+  title     = {{GraphEQA}: Using 3D Semantic Scene Graphs for Real-time Embodied Question Answering},
+  author    = {Saxena, Saumya and others},
+  booktitle = {Conference on Robot Learning (CoRL)},
+  year      = {2025},
+  note      = {[verified] 3DSG + 任务相关图像. fusion=WM+SG+GM},
+  eprint    = {2412.14480},
+  archivePrefix = {arXiv},
+}
+
+@article{tan2023keqa,
+  title   = {Knowledge-based Embodied Question Answering},
+  author  = {Tan, Sinan and Ge, Mengmeng and Guo, Di and Liu, Huaping and Sun, Fuchun},
+  journal = {IEEE Transactions on Pattern Analysis and Machine Intelligence},
+  year    = {2023},
+  doi     = {10.1109/TPAMI.2023.3277206},
+  note    = {[verified] K-EQA, 外部知识图谱. fusion=SG+GM+SM. 原2021预印, TPAMI 2023},
+  eprint  = {2109.07872},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{wu2024dgraphqa,
+  title     = {3D Question Answering with Scene Graph Reasoning},
+  author    = {Wu, Ziyu and others},
+  booktitle = {Proceedings of the 32nd ACM International Conference on Multimedia},
+  pages     = {1370--1378},
+  year      = {2024},
+  doi       = {10.1145/3664647.3687672},
+  note      = {[unverified] 3DGraphQA, 无arXiv. fusion=SG},
+}
+
+@article{fang2026inheritsg,
+  title   = {{INHerit-SG}: Incremental Hierarchical Semantic Scene Graphs with {RAG}-Style Retrieval},
+  author  = {Fang, YukTung Samuel and Shi, Zhikang and Qiu, Jiabin and Chen, Zixuan and
+            Shi, Jieqi and Xu, Hao and Huo, Jing and Gao, Yang},
+  year    = {2026},
+  note    = {[verified] 4层层级图(楼层-房间-功能区-物体) + 视角指针 + 双流异步 + 事件触发. fusion=SG+GM+SM. 用户重点关注},
+  eprint  = {2602.12971},
+  archivePrefix = {arXiv},
+}
+
+
+% #########################################################################
+% ## E. 情景/时序记忆 (Episodic / Temporal)
+% #########################################################################
+
+@article{hu2025mempalace,
+  title   = {Enter the Mind Palace: Long-term Active Embodied Question Answering with Large Language Models},
+  author  = {Ginting, Stephen and others},
+  year    = {2025},
+  note    = {[verified] LA-EQA / Mind Palace, world instances + VoI停止. CoRL 2025. fusion=WM+SG+GM+EM},
+  eprint  = {2507.12846},
+  archivePrefix = {arXiv},
+}
+
+@article{hu2025threedllmmem,
+  title   = {{3DLLM-Mem}: Long-Term Spatial-Temporal Memory for Embodied {3D} Large Language Models},
+  author  = {Hu, W. and others},
+  year    = {2025},
+  note    = {[verified] 工作记忆token + 长期库cross-attn. NeurIPS 2025. fusion=WM+EM},
+  eprint  = {2505.22657},
+  archivePrefix = {arXiv},
+}
+
+
+% #########################################################################
+% ## F. 认知理论启发记忆 (Cognitive-theory Inspired)
+% #########################################################################
+
+@article{wang2024karma,
+  title   = {{KARMA}: Augmenting Embodied {AI} Agents with Long-and-short-Term Memory Systems},
+  author  = {Wang and others},
+  year    = {2024},
+  note    = {[verified] STM/LTM认知建模. fusion=WM+EM+SM},
+  eprint  = {2409.14908},
+  archivePrefix = {arXiv},
+}
+
+@article{cho2024satama,
+  title   = {Spatially-Aware Transformer for Embodied Agents},
+  author  = {Cho, Junmo and Yoon, Jaesik and Ahn, Sungjin},
+  year    = {2024},
+  note    = {[verified] SAT-AMA (SAT + Adaptive Memory Allocator), 学习式记忆管理/淘汰. fusion=WM+EM},
+  eprint  = {2402.15160},
+  archivePrefix = {arXiv},
+}
+
+@article{himm2026,
+  title   = {{HIMM}: Human-Inspired Long-Term Memory Modeling for {MLLM}-based Embodied Agents},
+  author  = {Li, J. and others},
+  year    = {2026},
+  note    = {[verified] 显式情景/语义分离 + 规则沉淀, 最接近6槽位全套(占5). fusion=WM+SG+GM+EM+SM+PM},
+  eprint  = {2602.15513},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{m4ei2025,
+  title     = {{M4EI}: A Hierarchical Multimodal Memory Framework for Embodied Intelligence},
+  author    = {others},
+  year      = {2025},
+  publisher = {Springer},
+  doi       = {10.1007/978-981-92-2759-4_35},
+  note      = {[unverified] skill层, 无arXiv. fusion=WM+EM+PM},
+}
+
+
+% #########################################################################
+% ## G. LLM/VLM 基础记忆 + 检索增强 (2025-2026 主流)
+% #########################################################################
+
+@article{zhai2025memoryeqa,
+  title   = {Memory-Centric Embodied Question Answering},
+  author  = {Zhai, Mingliang and Gao, Zhi and Wu, Yuwei and Jia, Yunde},
+  year    = {2025},
+  note    = {[verified] MemoryEQA, 熵自适应检索 + 三模块分发(planner+stopper+answerer). fusion=WM+GM+EM+SM. 用户重点关注},
+  eprint  = {2505.13948},
+  archivePrefix = {arXiv},
+}
+
+@article{anwar2024remembr,
+  title   = {{ReMEmbR}: Retrieval-Augmented Embodied Memory for Robot Question Answering},
+  author  = {Anwar, Abrar and others},
+  year    = {2024},
+  note    = {[verified] 向量库长期记忆(VILA caption + pose + time). NVIDIA/USC. fusion=WM+GM+EM+SM},
+  eprint  = {2409.13682},
+  archivePrefix = {arXiv},
+}
+
+@article{xie2024embodiedrag,
+  title   = {{Embodied-RAG}: General Non-parametric Embodied Memory for Retrieval and Generation},
+  author  = {Xie, Quanting and Min, So Yeon and Ji, Pengliang and Yang, Yue and others},
+  year    = {2024},
+  note    = {[verified] 语义森林 + 拓扑图, 非参数化. NeurIPS 2024. fusion=WM+SG+GM+EM+SM},
+  eprint  = {2409.18313},
+  archivePrefix = {arXiv},
+}
+
+
+% #########################################################################
+% ## H. 多记忆融合 (2025-2026 核心趋势) -- 用户重点关注
+% #########################################################################
+
+@article{sohn2025r4,
+  title   = {{R4}: Retrieval-Augmented Reasoning for Vision-Language Models in {4D} Spatio-Temporal Space},
+  author  = {Sohn, Tin Stribor and Dillitzer, Maximilian and Corso, Jason J. and Sax, Eric},
+  year    = {2025},
+  note    = {[verified] R4, 每对象三轴索引(语义+空间+时间), ERQA超GPT-5. fusion=WM+SG+GM+EM+SM. 用户重点关注},
+  eprint  = {2512.15940},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{yuan2026predeqa,
+  title     = {Predict Before You Explore: Predictive Planning with Specialized Memory for Embodied Question Answering},
+  author    = {Yuan, Bowen and You, Sisi and Bao, Bing-Kun},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  pages     = {29610--29619},
+  year      = {2026},
+  note      = {[verified] Pred-EQA, 文本控制面 + 视觉证据数据面, 纯VLM. fusion=WM+GM+EM+SM. 代码: github.com/yuanrr/Pred-EQA. 用户重点关注},
+}
+
+@article{yeo2025worldmm,
+  title   = {{WorldMM}: Dynamic Multimodal Memory Agent for Long Video Reasoning},
+  author  = {Yeo, Woongyeong and Kim, Kangsan and Yoon, Jaehong and Hwang, Sung Ju},
+  year    = {2025},
+  note    = {[verified] 多时间尺度情景KG + 演化语义KG(consolidation) + 视觉记忆 + 自适应检索Agent. fusion=SG+EM+SM. 用户重点关注},
+  eprint  = {2512.02425},
+  archivePrefix = {arXiv},
+}
+
+@article{lei2025robomemory,
+  title   = {{RoboMemory}: A Brain-inspired Multi-memory Agentic Framework for Interactive Environmental Learning in Physical Embodied Systems},
+  author  = {Lei, Mingcong and Cai, Honghao and Yang, Yuyuan and others},
+  year    = {2025},
+  note    = {[verified] 4模块并行(空间+时序+情景+语义) + critic仲裁. fusion=WM+SG+GM+EM+SM. 占5槽位},
+  eprint  = {2508.01415},
+  archivePrefix = {arXiv},
+}
+
+@article{ma2026brainmem,
+  title   = {{BrainMem}: Brain-Inspired Evolving Memory for Embodied Agent Task Planning},
+  author  = {Ma, Xiaoyu and Hu, Lianyu and Tang, Wenbing and Hu, Zixuan and Liao, Zeqin and Wu, Zhizhen and Liu, Yang},
+  year    = {2026},
+  note    = {[verified] 工作+情景+语义, 自动符号规则沉淀. fusion=WM+EM+SM+PM},
+  eprint  = {2604.16331},
+  archivePrefix = {arXiv},
+}
+
+@article{zhang2025ella,
+  title   = {{Ella}: Embodied Social Agents with Lifelong Memory},
+  author  = {Zhang, Hongxin and Zhang, Zheyuan and Wang, Zeyuan and Zhang, Zunzhe and Fang, Lixing and Zhou, Qinhong and Gan, Chuang},
+  year    = {2025},
+  note    = {[verified] 名字中心语义 + 时空情景, 终身跨episode. fusion=WM+GM+EM+SM},
+  eprint  = {2506.24019},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{anokhin2025arigraph,
+  title     = {{AriGraph}: Learning Knowledge Graph World Models with Episodic Memory for {LLM} Agents},
+  author    = {Anokhin, Petr and others},
+  booktitle = {Proceedings of the International Joint Conference on Artificial Intelligence (IJCAI)},
+  year      = {2025},
+  note      = {[verified] 统一KG(语义+情景). fusion=EM+SM},
+  eprint    = {2407.04363},
+  archivePrefix = {arXiv},
+}
+
+@article{wen2026nsdm,
+  title   = {Aligning Progress and Feasibility: A Neuro-Symbolic Dual Memory Framework for Long-Horizon {LLM} Agents},
+  author  = {Wen, Bowen and others},
+  year    = {2026},
+  note    = {[verified] NSDM, 神经进展 + 符号可行性. fusion=WM+EM+SM},
+  eprint  = {2604.02734},
+  archivePrefix = {arXiv},
+}
+
+@article{tang2025side,
+  title   = {Semantic Intelligence: A Bio-Inspired Cognitive Framework for Embodied Agents},
+  author  = {Tang, Wenbing and Zhu, Meilin and Wu, Fenghua and Liu, Yang},
+  year    = {2025},
+  note    = {[verified] SIDE, 工作+情景+语义. fusion=WM+EM+SM},
+  eprint  = {2510.17129},
+  archivePrefix = {arXiv},
+}
+
+@article{yuan2026star,
+  title   = {{STaR}: Scalable Task-Conditioned Retrieval for Long-Horizon Multimodal Robot Memory},
+  author  = {Yuan, Mingxi and others},
+  journal = {IEEE Robotics and Automation Letters (RA-L)},
+  year    = {2026},
+  note    = {[verified] 多模态长期 + agentic MLLM层. fusion=WM+EM+SM},
+  eprint  = {2602.09255},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{zhou2025m2pa,
+  title     = {{M2PA}: A Multi-Memory Planning Agent for Open Worlds Inspired by Cognitive Theory},
+  author    = {Zhou, Yuxin and others},
+  booktitle = {Findings of the Association for Computational Linguistics: ACL 2025},
+  year      = {2025},
+  note      = {[unverified] 工作+情景+语义+LLM参数知识. ACL Anthology 2025.findings-acl.1191. 无arXiv. fusion=WM+EM+SM},
+}
+
+@inproceedings{reqa2025,
+  title     = {{R-EQA}: Retrieval-Augmented Generation for Embodied Question Answering},
+  author    = {Ong, Hyobin and others},
+  booktitle = {CVPR 2025 Embodied AI Workshop},
+  year      = {2025},
+  note      = {[unverified] RAG框架情景记忆. 代码 github.com/ohnghb99/R-EQA. 无arXiv. fusion=EM+SM},
+}
+
+@article{graphpad2025,
+  title   = {{GraphPad}: Inference-Time {3D} Scene Graph Updates for Embodied Question Answering},
+  author  = {others},
+  year    = {2025},
+  note    = {[verified] 场景图 + scratchpad + 帧 + nav日志. fusion=WM+SG+EM+SM},
+  eprint  = {2506.01174},
+  archivePrefix = {arXiv},
+}
+
+
+% #########################################################################
+% ## I. VLN / 导航方向 (可迁移到EQA)
+% #########################################################################
+
+@article{sevln2025,
+  title   = {{SE-VLN}: A Self-Evolving Vision-Language Navigation Framework Based on Multimodal Large Language Models},
+  author  = {others},
+  year    = {2025},
+  note    = {[verified] SE-VLN, 短期 + 语言拓扑图(长期). fusion=WM+SG+GM+EM},
+  eprint  = {2507.13152},
+  archivePrefix = {arXiv},
+}
+
+@article{memvln2026,
+  title   = {{MemVLN}: Episodic and Procedural Memory for Vision-and-Language Navigation},
+  author  = {others},
+  year    = {2026},
+  note    = {[verified] 金字塔情景 + 程序性快速动作. fusion=WM+EM+PM},
+  eprint  = {2607.23504},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{zeng2026janusvln,
+  title     = {{JanusVLN}: Decoupling Semantics and Spatiality with Dual Implicit Memory for Vision-Language Navigation},
+  author    = {Zeng, Shuang and others},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2026},
+  note      = {[verified] 空间几何 + 视觉语义双面. fusion=WM+GM+EM+SM},
+  eprint    = {2509.22548},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{song2025lhvln,
+  title     = {Towards Long-Horizon Vision-Language Navigation: Platform, Benchmark, and Method},
+  author    = {Song, Chan-Hee and others},
+  booktitle = {Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR)},
+  year      = {2025},
+  note      = {[verified] LH-VLN / MGDM, 短期 + 长期检索. fusion=WM+EM+SM},
+  eprint    = {2412.09082},
+  archivePrefix = {arXiv},
+}
+
+@article{zhou2025fsrvln,
+  title   = {{FSR-VLN}: Fast and Slow Reasoning for Vision-Language Navigation with Hierarchical Multi-modal Scene Graph},
+  author  = {Zhou and Xiao and others},
+  year    = {2025},
+  note    = {[verified] 层级场景图 + 快/慢推理. fusion=WM+SG+GM},
+  eprint  = {2509.13733},
+  archivePrefix = {arXiv},
+}
+
+
+% #########################################################################
+% ## J. 通用具身Agent / 机器人 (跨领域可迁移)
+% #########################################################################
+
+@article{yan2025dovsg,
+  title   = {Dynamic Open-Vocabulary 3D Scene Graphs for Long-term Language-Guided Mobile Manipulation},
+  author  = {Yan, Zhijie and Li, Shufei and Wang, Zuoxu and Wu, Lixiu and Wang, Han and Zhu, Jun and Chen, Lijiang and Liu, Jihong},
+  year    = {2025},
+  note    = {[verified] DovSG, 体素低层 + SG高层, 局部子图更新. fusion=SG+GM},
+  eprint  = {2410.11989},
+  archivePrefix = {arXiv},
+}
+
+@article{liu2025dynamem,
+  title   = {{DynaMem}: Online Dynamic Spatio-Semantic Memory for Open World Mobile Manipulation},
+  author  = {Liu, Peiqing and Liu, Zhijie and Zhan, Yuyang and others},
+  year    = {2025},
+  note    = {[verified] 动态体素 + 变化检测. fusion=GM+SM},
+  eprint  = {2411.04999},
+  archivePrefix = {arXiv},
+}
+
+@article{tan2025roboosnext,
+  title   = {{RoboOS-NeXT}: A Unified Memory-based Framework for Lifelong, Scalable, and Robust Multi-Robot Collaboration},
+  author  = {Tan, Huajie and Chi, Cheng and Chen, Xiansheng and Ji, Yuheng and others},
+  year    = {2025},
+  note    = {[verified] STEM(空间+时序+embodiment能力). fusion=WM+GM+EM+SM+PM},
+  eprint  = {2510.26536},
+  archivePrefix = {arXiv},
+}
+
+@article{roboos2025,
+  title   = {{RoboOS}: A Hierarchical Embodied Framework for Cross-Embodiment and Multi-Agent Collaboration},
+  author  = {others},
+  year    = {2025},
+  note    = {[verified] RoboOS 原版(非NeXT). fusion=WM+GM+EM},
+  eprint  = {2505.03673},
+  archivePrefix = {arXiv},
+}
+
+@inproceedings{parashar2026epm,
+  title     = {Planning with an Embodied Learnable Memory},
+  author    = {Parashar, Priyam and Krantz, Jacob and Chang, Matthew and Shah, Kavit and Puig, Xavier and Mottaghi, Roozbeh},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2026},
+  note      = {[verified] EPM, 可学习写/遗忘策略. OpenReview 79BOATBal9. fusion=WM+GM},
+}
+
+@article{epimem2025,
+  title   = {Past Lives of a Robot: Episodic Memory Indexing for Pretrained Manipulation Policies},
+  author  = {Seo, Nayun and others},
+  year    = {2025},
+  note    = {[unverified] 层级情景 + VLA参数记忆, 多级轨迹压缩. fusion=WM+EM+PM},
+}
+
+@article{memer2025,
+  title   = {Scaling Up Memory for Robot Control via Experience Retrieval},
+  author  = {others},
+  year    = {2025},
+  note    = {[verified] MemER, 分钟级经验检索 + 策略工作记忆. fusion=WM+EM},
+  eprint  = {2510.20328},
+  archivePrefix = {arXiv},
+}
+
+@article{beetz2025cram2,
+  title   = {Robot Manipulation in Everyday Activities with the {CRAM 2.0} Cognitive Architecture and Generalized Action Plans},
+  author  = {Beetz, Michael and Kazhoyan, Gayane and Vernon, David},
+  journal = {Cognitive Systems Research},
+  volume  = {92},
+  year    = {2025},
+  note    = {[verified] CRAM 2.0, 程序性plan库 + 语义 + 情景, 罕见全套(占5槽位). fusion=WM+SG+EM+SM+PM},
+}
+
+@article{meng2025legion,
+  title   = {Preserving and Combining Knowledge in Robotic Lifelong Reinforcement Learning},
+  author  = {Meng, Yuan and others},
+  journal = {Nature Machine Intelligence},
+  pages   = {256--269},
+  year    = {2025},
+  doi     = {10.1038/s42256-025-00983-2},
+  note    = {[verified] LEGION, 终身具身agent. fusion=WM+GM+EM+SM},
+}
+
+
+% #########################################################################
+% ## K. 城市EQA (特殊场景)
+% #########################################################################
+
+@inproceedings{zhang2025cityeqa,
+  title     = {{CityEQA}: A Hierarchical {LLM} Agent on Embodied Question Answering Benchmark in City Space},
+  author    = {Zhang and others},
+  booktitle = {Proceedings of the Conference on Empirical Methods in Natural Language Processing (EMNLP)},
+  year      = {2025},
+  note      = {[verified] OSM先验, 城市场景. fusion=SG+GM+SM},
+  eprint    = {2502.12532},
+  archivePrefix = {arXiv},
+}
+
+
+% =========================================================================
+% 备注:
+% 1. "Episodic eKG" (ACL 2025 Workshop) 未能定位, 已排除, 待人工查证
+% 2. 部分论文作者列用 "others" 占位, 使用前请查 arXiv 页面补全
+% 3. 标 [verified] 的 arXiv ID 经 DBLP/arXiv 核实; [unverified] 用 venue/DOI
+% 4. fusion= 标签可直接 grep 按记忆融合模式检索
+% =========================================================================
