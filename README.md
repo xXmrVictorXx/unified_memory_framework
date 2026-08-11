@@ -1,67 +1,62 @@
-# 通用 EQA 记忆框架 — VLA 智能体记忆修正研究
+# 通用EQA记忆框架与VLA智能体记忆修正
 
 > **目标**：让 VLA/EQA 系统主动识别记忆中的错误并修复。
 > **路径**：通过统一记忆框架 `unimem` 把不同方法的记忆模块抽象整合，使跨层 / 跨方法的错误记忆检索与修正成为可能。
-> **状态**：框架骨架已实现，三种真实方法已复现并接入；下一步进入记忆修正模块的研究。
+> **状态**：框架骨架已实现，且已复现三种已有EQA/VLA方法；等待进行实机测试
 
 ---
 
 ## 项目结构
 
 ```
-cdx/
+unified_memory_framework/
 ├── research/          # 文献调研存档（~55 篇 EQA/具身Agent 论文）
 │   ├── README.md      # 存档索引 + 核实修正记录
-│   ├── research_notes.md  # 研究结论（目标、6 槽位框架、7 种融合模式）
+│   ├── research_notes.md  # 研究结论
 │   ├── papers_matrix.md   # 论文 × 记忆模块分类矩阵
-│   └── references.bib     # 51 篇文献，按类别分组
+│   └── references.bib     # 格式化引用
 │
-├── unimem/            # 通用记忆框架（纯 stdlib，Python 3.9+，149 测试）
-│   ├── core/          # 数据类型 + ABC（6 槽位专用）
-│   ├── graph/         # 5 种边 + MemoryGraph（三个核心图算法）
-│   ├── policies/      # 4 类横切策略 ABC + 默认实现
-│   ├── factory/       # Registry + 声明式 GraphSpec 构建
+├── unimem/            # 通用记忆框架
+│   ├── core/          # 数据类型与抽象
+│   ├── graph/         # 记忆图实现
+│   ├── policies/      # 读写策略与参考实现
+│   ├── factory/       # 工厂方法
 │   ├── reference/     # 唯一参考实现 ListEpisodicMemory
-│   └── tests/         # 9 个测试文件
+│   └── tests/         # 测试
 │
-├── reproductions/     # 三种真实方法的记忆复现（177 测试，零第三方依赖）
-│   ├── _common/       # MockLLM / MockVLM / MockEmbedding / MockVisionTools
-│   ├── r4/            # R4 (arXiv 2512.15940) — 4D 知识库
-│   ├── clivis/        # CLiViS (CVPR 2026) — 三模块记忆 + 迭代 refinement
-│   ├── videohv/       # VideoHV-Agent (CVPR 2026) — 重构为隐式记忆系统
-│   └── tests/         # 跨方法对比集成测试
-│
-└── reproduce/         # 原始论文 / 源码（只读参考，不修改）
-    ├── CLiViS/        # CLiViS 完整源码
-    ├── R4/R4.pdf      # R4 论文 PDF
-    └── VideoHV-Agent/ # VideoHV-Agent 完整源码
+├── reproductions/     # 三种已有方法实现与重构
+    ├── _common/       # Mock
+    ├── r4/            # R^4 (arXiv 2512.15940) — 4D知识库
+    ├── clivis/        # CLiViS (CVPR 2026) — 三种模块记忆+迭代修正
+    ├── videohv/       # VideoHV-Agent (CVPR 2026) — 图像注释->隐式记忆
+    └── tests/         # 对比测试
 ```
 
 ---
 
-## 研究主线（问题-差距-方法）
+## 研究背景
 
 - **问题**：VLA/EQA 智能体运行中累积记忆错误——幻觉对象、位置漂移、信息过时、关系错误、语义误分类、合并/沉淀引入的假事实——导致问答与导航精度下降。
 - **差距**：现有方法只有**预防性**机制（写入门控、单次 VLM 验证），无系统性**纠正性**机制；各方法记忆彼此孤立、表征各异，无法跨方法纠错。
-- **方法**：以统一多槽位记忆框架（WM / SG / GM / EM / SM / PM + 横切机制）为基底，支持：
-  1. **跨槽位一致性校验**——一种表征挑战另一种表征（如 SG 的"杯在桌上" vs GM 的桌面几何）
-  2. **即插即用记忆修正模块**——通过统一接口适配不同 VLA/EQA 架构
+- **方法**：实现了统一的多模块记忆框架（WM / SG / GM / EM / SM / PM），支持：
+  1. **多模块一致性校验**——处理不同模块记忆交互（如 SG 的"杯子在桌上" vs GM 的桌面几何）
+  2. **即插即用的记忆修正模块**——通过统一接口适配不同 VLA/EQA 架构
   3. **跨方法记忆对比**——集成式错误检测（场景图法 vs 地图法 对同一环境的记忆差异）
 
 ---
 
 ## `unimem/` — 通用记忆框架
 
-纯 Python 标准库实现。**零第三方依赖，Python 3.9+ 兼容**。详细文档见 [unimem/README.md](unimem/README.md)（设计原则、关键决策、API 速查）。
+纯Python标准库实现，无第三方依赖。详细文档见 [unimem/README.md](unimem/README.md)（设计原则、关键决策、API 速查）。
 
 ### 核心设计
 
-- **6 槽位**（`MemorySlot` 枚举）：`WM` / `SG` / `GM` / `EM` / `SM` / `PM`
-- **模块即节点**：每个 `MemoryModule` 实例是图中一个节点；数据流/沉淀/索引是边
-- **5 种边**（`EdgeKind`）：`FEEDS`（数据流）/ `CONSOLIDATES_TO`（沉淀）/ `INDEXES` / `REFERENCES` / `SUBSUMES`（层级）
-- **三个核心图算法**（`MemoryGraph`）：
-  1. **扇出读** `read(query)` — 广播 query 到所有匹配 slot_filter 的节点，结果带溯源
-  2. **扇入写** `write(entry, source)` — BFS 沿 FEEDS 边传播，VISITED 防环，三级写策略门控（边>模块>图默认）
+- **6种记忆槽位**（`MemorySlot`）：`WM` / `SG` / `GM` / `EM` / `SM` / `PM`
+- **模块即图节点**：每个 `MemoryModule` 实例是图中一个节点；数据流/沉淀/索引是边
+- **5种关系边**（`EdgeKind`）：`FEEDS`（数据流）/ `CONSOLIDATES_TO`（沉淀）/ `INDEXES` / `REFERENCES` / `SUBSUMES`（层级）
+- **3个核心图算法**（`MemoryGraph`）：
+  1. **扇出-读** `read(query)` — 广播 query 到所有匹配 slot_filter 的节点，结果带溯源
+  2. **扇入-写** `write(entry, source)` — BFS 沿 FEEDS 边传播，VISITED 防环，三级写策略门控（边>模块>图默认）
   3. **沉淀遍历** `run_consolidation_pass(ctx)` — 沿 CONSOLIDATES_TO 提取并写入，后置遗忘扫描
 
 ### 关键设计决策
@@ -154,7 +149,7 @@ CLiViS 的 LLM/VLM、R4 的 embedding、VideoHV 的 vision-tools 同理可替换
 
 ## 关键参照方法
 
-研究主线（记忆修正）的对照基准——每种方法的现有预防性机制，及其作为修正研究切入点的局限：
+研究主线的对照基准——每种方法的现有预防性机制，及其作为修正研究切入点的局限：
 
 | 方法 | 现有机制 | 局限（修正研究的切入点） |
 |------|---------|------------------------|
