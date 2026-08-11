@@ -1,12 +1,14 @@
-"""CLiViS ``NavigationGraph`` — temporal-spatial index of video segments.
+"""CLiViS ``NavigationGraph`` — storage-backed temporal-spatial index.
 
-Reproduces ``reproduce/CLiViS/clivis/graph/navigation_graph.py`` in pure
-Python (no moviepy / cv2 / decord). The original slices video into temporal
-periods; we accept period metadata from the caller.
+A thin facade over :class:`~unimem.graph_storage.base.GraphStorage` that
+preserves CLiViS's high-level API (period indexing, area/object/activity
+lookup) without subclassing any unimem slot ABC. It still inherits from
+:class:`~unimem.core.module.MemoryModule` so the
+:class:`~unimem.graph.graph.MemoryGraph` can host it as a node.
 
-Each period carries: description, list of areas, list of objects, optional
-activity label. Areas are matched to periods via overlap between the area's
-``time_range`` and the period's name (which encodes a time interval).
+Each period becomes a node labelled ``:spatial_geometric:Period``; areas /
+objects / persons / activities are tracked via per-period edge relationships
+(``IN_PERIOD`` / ``HAS_AREA`` / ``HAS_OBJECT``).
 """
 from __future__ import annotations
 
@@ -15,8 +17,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from unimem.core.context import MemoryContext
 from unimem.core.entry import MemoryEntry
+from unimem.core.module import MemoryModule
 from unimem.core.query import Query, QueryResult
-from unimem.core.slot_abc import SpatialGeometricMemoryABC
+from unimem.core.slots import MemorySlot
+from unimem.graph_storage import GraphStorage, InMemoryGraphStorage
 
 
 def _parse_range_seconds(text: str) -> Optional[Tuple[float, float]]:
@@ -26,9 +30,11 @@ def _parse_range_seconds(text: str) -> Optional[Tuple[float, float]]:
     matches = re.findall(r"(\d+):(\d+):(\d+)", text)
     if len(matches) < 2:
         return None
+
     def to_sec(t):
         h, m, s = t
         return int(h) * 3600 + int(m) * 60 + int(s)
+
     return to_sec(matches[0]), to_sec(matches[1])
 
 
@@ -36,14 +42,15 @@ def _ranges_overlap(a: Tuple[float, float], b: Tuple[float, float]) -> bool:
     return a[0] <= b[1] and b[0] <= a[1]
 
 
-class NavigationGraph(SpatialGeometricMemoryABC):
+class NavigationGraph(MemoryModule):
     """Period-indexed store of areas / objects / activities.
 
-    Maps directly to the unimem Spatial slot because each period has an
-    implicit spatial extent (the area it belongs to) and the queries are
-    fundamentally spatial-temporal (``"what was in this area during this
-    period?"``).
+    Each period is stored as a graph node ``:spatial_geometric:Period``
+    keyed by its name. Areas, persons, objects, activities are tracked
+    as edges from the period node (``HAS_AREA``, ``HAS_OBJECT``, etc.).
     """
+
+    SLOT = MemorySlot.GM  # Spatial-geometric slot
 
     def __init__(
         self,
@@ -51,7 +58,10 @@ class NavigationGraph(SpatialGeometricMemoryABC):
         video_path: str = "",
         seg_output_path: str = "",
         video_duration: float = 0.0,
+        graph_storage: Optional[GraphStorage] = None,
     ) -> None:
+        super().__init__(slot=self.SLOT)
+        self._gs = graph_storage or InMemoryGraphStorage()
         self.periods_infos: Dict[str, Dict[str, Any]] = {}
         self.periods_to_obj_names: Dict[str, List[str]] = {}
         self.periods_to_activities: Dict[str, str] = {}
@@ -65,10 +75,13 @@ class NavigationGraph(SpatialGeometricMemoryABC):
         self.seg_output_path = seg_output_path
         self.video_duration = float(video_duration)
 
-        # Seed empty periods from caller-supplied descriptions
         if period_description_dict:
             for period_name, desc in period_description_dict.items():
                 self._init_period(period_name, desc)
+
+    @property
+    def graph_storage(self) -> GraphStorage:
+        return self._gs
 
     def _init_period(self, period_name: str, description: str) -> None:
         if period_name in self.periods_infos:
@@ -82,6 +95,12 @@ class NavigationGraph(SpatialGeometricMemoryABC):
         self.periods_to_obj_names.setdefault(period_name, [])
         self.periods_to_activities.setdefault(period_name, "")
         self.periods_to_areas.setdefault(period_name, [])
+        # Mirror to storage.
+        self._gs.add_node(
+            period_name,
+            [self.SLOT.value, "Period"],
+            {"description": description},
+        )
 
     # ------------------------------------------------------------------ #
     # Original CLiViS API
@@ -96,6 +115,11 @@ class NavigationGraph(SpatialGeometricMemoryABC):
                 continue
             self.person_names.add(name)
             self.person_info[name] = p.get("info", "")
+            self._gs.add_node(
+                name,
+                [self.SLOT.value, "Person"],
+                {"info": p.get("info", "")},
+            )
 
     def get_person_info(self, person_name: str) -> Optional[str]:
         return self.person_info.get(person_name)
@@ -111,7 +135,11 @@ class NavigationGraph(SpatialGeometricMemoryABC):
             a_range = _parse_range_seconds(time_range)
             if a_range is None:
                 continue
-            # Attach to every overlapping period
+            self._gs.add_node(
+                name,
+                [self.SLOT.value, "Area"],
+                {"info": info, "time_range": time_range},
+            )
             for period_name in self.periods_infos:
                 p_range = _parse_range_seconds(period_name)
                 if p_range is None:
@@ -132,6 +160,12 @@ class NavigationGraph(SpatialGeometricMemoryABC):
                 bucket.append(o)
                 self.obj_names.add(o)
                 self.periods_infos[period]["objects"].append(o)
+                self._gs.add_node(
+                    o,
+                    [self.SLOT.value, "Object"],
+                    {"period": period},
+                )
+                self._gs.add_edge(period, o, "HAS_OBJECT", {})
 
     def add_activity(self, activity_name: str, period: str) -> None:
         if period not in self.periods_infos:
@@ -141,7 +175,7 @@ class NavigationGraph(SpatialGeometricMemoryABC):
             self.periods_infos[period]["activities"].append(activity_name)
 
     def output_periods_info(self) -> str:
-        lines = []
+        lines: List[str] = []
         for period, info in self.periods_infos.items():
             lines.append(f"Period: {period}")
             lines.append(f"  description: {info['description']}")
@@ -153,7 +187,7 @@ class NavigationGraph(SpatialGeometricMemoryABC):
         return "\n".join(lines)
 
     def output_periods_description(self) -> str:
-        lines = []
+        lines: List[str] = []
         for period, info in self.periods_infos.items():
             lines.append(f"Period {period}: {info['description']}")
         return "\n".join(lines)
@@ -169,45 +203,35 @@ class NavigationGraph(SpatialGeometricMemoryABC):
         self.video_segments_to_files[period] = file_path
 
     # ------------------------------------------------------------------ #
-    # SpatialGeometricMemoryABC
+    # Stats
     # ------------------------------------------------------------------ #
-    def is_navigable(self, point) -> bool:
-        """CLiViS doesn't compute navigability — a period either has areas or not."""
-        # If ``point`` is a period string, return True iff that period has areas.
-        if isinstance(point, str):
-            return bool(self.periods_to_areas.get(point))
-        return True
+    def stats(self) -> Dict[str, Any]:
+        return {
+            "count": len(self.periods_infos),
+            "n_persons": len(self.person_names),
+            "n_areas": len(self.area_names),
+            "n_objects": len(self.obj_names),
+        }
 
-    def get_region(self, center, radius: float):
-        """Return all periods whose area set includes the named ``center``.
-
-        ``radius`` is ignored — CLiViS doesn't have metric distance; "region"
-        here means "the periods in which the given area was active".
-        """
-        if not isinstance(center, str):
-            return []
-        result = []
-        for period, areas in self.periods_to_areas.items():
-            if center in areas:
-                result.append((period, {"area": center, "areas": areas}))
-        return result
+    def clear(self) -> None:
+        self.periods_infos.clear()
+        self.periods_to_obj_names.clear()
+        self.periods_to_activities.clear()
+        self.periods_to_areas.clear()
+        self.person_names.clear()
+        self.area_names.clear()
+        self.obj_names.clear()
+        self.person_info.clear()
+        self.video_segments_to_files.clear()
+        # Drop every Period / Area / Object / Person node labelled with slot.
+        self._gs.query(
+            f"MATCH (n:{self.SLOT.value}) DETACH DELETE n"
+        )
 
     # ------------------------------------------------------------------ #
-    # MemoryModule contract
+    # MemoryModule contract — dispatches on entry.metadata["kind"]
     # ------------------------------------------------------------------ #
     def write(self, entry: MemoryEntry, context: MemoryContext) -> bool:
-        """Accept an entry describing a period/area/object observation.
-
-        Entry schema:
-            text: period description
-            metadata: {
-                "kind": "period" | "person" | "area" | "object" | "activity",
-                "period": <period name>,
-                "name": <entity name>,
-                "info": <optional info>,
-                "time_range": <optional, for area>,
-            }
-        """
         kind = entry.metadata.get("kind", "period")
         period = entry.metadata.get("period")
         name = entry.metadata.get("name", "")
@@ -232,9 +256,8 @@ class NavigationGraph(SpatialGeometricMemoryABC):
         return True
 
     def read(self, query: Query) -> QueryResult:
-        """Retrieve period entries filtered by area/object via semantic_keys."""
         sem = set(query.semantic or [])
-        entries = []
+        entries: List[MemoryEntry] = []
         for period, info in self.periods_infos.items():
             period_keys = set(self.periods_to_areas.get(period, [])) | set(
                 self.periods_to_obj_names.get(period, [])
@@ -245,32 +268,12 @@ class NavigationGraph(SpatialGeometricMemoryABC):
                 entry_id=f"nav-{period}",
                 text=info["description"],
                 semantic_keys=sorted(period_keys),
-                temporal_keys=[(_parse_range_seconds(period) or (0.0, 0.0))[0]],
-                source_slot="spatial_geometric",
+                source_slot=self.SLOT.value,
                 metadata={"period": period, **self.get_entities_in_period(period)},
             ))
         if query.top_k is not None:
             entries = entries[: query.top_k]
-        return QueryResult(entries=entries, source_slot="spatial_geometric")
-
-    def clear(self) -> None:
-        self.periods_infos.clear()
-        self.periods_to_obj_names.clear()
-        self.periods_to_activities.clear()
-        self.periods_to_areas.clear()
-        self.person_names.clear()
-        self.area_names.clear()
-        self.obj_names.clear()
-        self.person_info.clear()
-        self.video_segments_to_files.clear()
-
-    def stats(self) -> Dict[str, Any]:
-        return {
-            "count": len(self.periods_infos),
-            "n_persons": len(self.person_names),
-            "n_areas": len(self.area_names),
-            "n_objects": len(self.obj_names),
-        }
+        return QueryResult(entries=entries, source_slot=self.SLOT.value)
 
 
 __all__ = ["NavigationGraph", "_parse_range_seconds"]

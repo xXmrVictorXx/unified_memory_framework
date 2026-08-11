@@ -8,6 +8,12 @@
 
 Graphs are intentionally small (3–8 nodes per design), so we use plain
 adjacency dicts and linear scans. No networkx, no caching, no async.
+
+When a :class:`~unimem.graph_storage.base.GraphStorage` is attached, every
+topology mutation (``add_node`` / ``add_edge``) and every write is
+double-written to the storage backend. An optional
+:class:`~unimem.op_log.OpLog` records each write as a WAL entry for
+crash-recovery / audit.
 """
 from __future__ import annotations
 
@@ -37,6 +43,8 @@ class MemoryGraph:
     def __init__(
         self,
         *,
+        graph_storage: Optional[Any] = None,
+        op_log: Optional[Any] = None,
         default_write_policy: Optional[WritePolicy] = None,
         default_read_policy: Optional[ReadPolicy] = None,
         default_forget_policy: Optional[ForgetPolicy] = None,
@@ -51,6 +59,11 @@ class MemoryGraph:
         self.default_read_policy: ReadPolicy = default_read_policy or ConcatRead()
         self.default_forget_policy: ForgetPolicy = default_forget_policy or NoOp()
 
+        # Persistence — optional. When present, every topology mutation and
+        # every write/read is mirrored into the storage backend.
+        self._graph_storage = graph_storage
+        self._op_log = op_log
+
     # ------------------------------------------------------------------ #
     # Construction
     # ------------------------------------------------------------------ #
@@ -60,6 +73,15 @@ class MemoryGraph:
         self._nodes[node.node_id] = node
         self._out.setdefault(node.node_id, [])
         self._in.setdefault(node.node_id, [])
+        # Mirror into storage
+        if self._graph_storage is not None:
+            self._graph_storage.add_module_node(
+                node.node_id,
+                node.slot,
+                type(node.module).__name__,
+                label=node.label,
+                **dict(node.metadata),
+            )
 
     def add_edge(self, edge: MemoryEdge) -> None:
         for nid in (edge.source_id, edge.target_id):
@@ -67,6 +89,12 @@ class MemoryGraph:
                 raise KeyError(f"Edge references unknown node: {nid!r}")
         self._out[edge.source_id].append(edge)
         self._in[edge.target_id].append(edge)
+        # Mirror into storage
+        if self._graph_storage is not None:
+            policy_dict = _policy_to_dict(edge.policy)
+            self._graph_storage.add_module_edge(
+                edge.source_id, edge.target_id, edge.kind, policy_dict
+            )
 
     def get_node(self, node_id: str) -> Optional[MemoryNode]:
         return self._nodes.get(node_id)
@@ -192,6 +220,10 @@ class MemoryGraph:
           unchanged (identity propagation); any transformation is the
           target module's own ``write`` responsibility.
 
+        When an :class:`~unimem.op_log.OpLog` is attached, every write is
+        recorded as a WAL entry before dispatch (and a post-write marker
+        after), enabling crash recovery and audit.
+
         Returns a ``{node_id: did_store}`` map for every node that was
         *reached* (policies may still have rejected the write at the gate).
         """
@@ -205,6 +237,16 @@ class MemoryGraph:
                 if source_node_id and source_node_id in self._nodes
                 else None
             )
+
+        # WAL pre-write
+        if self._op_log is not None:
+            from ..op_log import OpLogEntry
+            self._op_log.append(OpLogEntry(
+                op_type="write",
+                node_id=source_node_id,
+                entry_dict=_entry_to_dict(entry),
+                context_dict=_context_to_dict(context),
+            ))
 
         results: Dict[str, bool] = {}
         visited: Set[str] = set()
@@ -245,6 +287,15 @@ class MemoryGraph:
             for edge in self._out.get(node_id, []):
                 if edge.kind == EdgeKind.FEEDS and edge.target_id not in visited:
                     queue.append(edge.target_id)
+
+        # WAL post-write marker
+        if self._op_log is not None:
+            from ..op_log import OpLogEntry
+            self._op_log.append(OpLogEntry(
+                op_type="write_done",
+                node_id=source_node_id,
+                result=results,
+            ))
 
         return results
 
@@ -359,12 +410,59 @@ class MemoryGraph:
             },
         }
 
+    # ------------------------------------------------------------------ #
+    # Storage accessors
+    # ------------------------------------------------------------------ #
+    @property
+    def graph_storage(self):
+        return self._graph_storage
+
+    @property
+    def op_log(self):
+        return self._op_log
+
 
 def _safe_stats(module: MemoryModule) -> Dict[str, Any]:
     try:
         return module.stats()
     except Exception as exc:  # pragma: no cover - defensive
         return {"_error": repr(exc)}
+
+
+def _policy_to_dict(policy: Any) -> Optional[Dict[str, Any]]:
+    """Serialise an edge policy to a dict for storage."""
+    if policy is None:
+        return None
+    # WritePolicy / ConsolidationPolicy: best-effort serialise
+    if hasattr(policy, "to_dict") and callable(policy.to_dict):
+        try:
+            return policy.to_dict()
+        except Exception:
+            pass
+    return {"type": type(policy).__name__}
+
+
+def _entry_to_dict(entry: MemoryEntry) -> Dict[str, Any]:
+    return {
+        "entry_id": entry.entry_id,
+        "text": entry.text,
+        "semantic_keys": list(entry.semantic_keys),
+        "spatial_keys": [list(k) for k in entry.spatial_keys],
+        "temporal_keys": list(entry.temporal_keys),
+        "metadata": dict(entry.metadata),
+        "source_slot": entry.source_slot,
+    }
+
+
+def _context_to_dict(ctx: MemoryContext) -> Dict[str, Any]:
+    return {
+        "episode_id": ctx.episode_id,
+        "task_id": ctx.task_id,
+        "pose": list(ctx.pose) if ctx.pose is not None else None,
+        "timestamp": ctx.timestamp,
+        "step": ctx.step,
+        "extra": dict(ctx.extra),
+    }
 
 
 __all__ = ["MemoryGraph"]

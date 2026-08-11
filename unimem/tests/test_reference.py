@@ -183,6 +183,9 @@ class TestListEpisodicConsolidation(unittest.TestCase):
 
 
 class _Dummy(MemoryModule):
+    def __init__(self):
+        super().__init__(slot=MemorySlot.WM)
+
     def write(self, e, c): return True
     def read(self, q): return QueryResult()
     def clear(self): pass

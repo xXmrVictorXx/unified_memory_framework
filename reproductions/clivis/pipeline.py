@@ -353,7 +353,7 @@ class CLiViSPipeline:
         plus the most recent rationale's area/object.
         """
         names = set()
-        for node_name in rel._nodes.keys():  # noqa: SLF001 — intentional access for match
+        for node_name in rel.all_node_names():
             if node_name.lower() in question.lower():
                 names.add(node_name)
         if wm.rationale_list:

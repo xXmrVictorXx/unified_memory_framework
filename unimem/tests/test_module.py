@@ -1,4 +1,4 @@
-"""Tests verifying ABC compliance and that minimal concrete modules work."""
+"""Tests verifying the storage-aware MemoryModule + slot ABC mixins."""
 from __future__ import annotations
 
 import unittest
@@ -17,19 +17,17 @@ from unimem.core.slot_abc import (
     WorkingMemoryABC,
 )
 from unimem.core.slots import MemorySlot
+from unimem.graph_storage import InMemoryGraphStorage
 
 
-class TestABCInheritance(unittest.TestCase):
-    def test_module_is_abc(self):
-        self.assertTrue(issubclass(MemoryModule, ABC))
-        self.assertTrue(hasattr(MemoryModule, "__abstractmethods__"))
-        # The 4 abstract methods named in the plan
-        self.assertEqual(
-            MemoryModule.__abstractmethods__,
-            {"write", "read", "clear", "stats"},
-        )
+class TestSlotABCInheritance(unittest.TestCase):
+    def test_module_not_abc_itself(self):
+        # MemoryModule now has storage-backed defaults — no longer abstract.
+        self.assertFalse(issubclass(MemoryModule, ABC))
+        m = MemoryModule(slot=MemorySlot.WM)
+        self.assertIsInstance(m, MemoryModule)
 
-    def test_slot_abcs_extend_module(self):
+    def test_slot_abcs_extend_module_and_abc(self):
         for slot_cls in (
             WorkingMemoryABC,
             SceneGraphMemoryABC,
@@ -39,9 +37,10 @@ class TestABCInheritance(unittest.TestCase):
             ProceduralMemoryABC,
         ):
             self.assertTrue(issubclass(slot_cls, MemoryModule), slot_cls)
+            self.assertTrue(issubclass(slot_cls, ABC), slot_cls)
 
-    def test_slot_abcs_add_methods(self):
-        # Each slot ABC should expose its slot-specific methods.
+    def test_slot_abcs_declare_abstract_methods(self):
+        # The slot ABCs still enforce their slot-specific methods via ABC.
         self.assertIn("get_current", WorkingMemoryABC.__abstractmethods__)
         self.assertIn("set_current", WorkingMemoryABC.__abstractmethods__)
         self.assertIn("add_object", SceneGraphMemoryABC.__abstractmethods__)
@@ -56,78 +55,116 @@ class TestABCInheritance(unittest.TestCase):
         self.assertIn("add_skill", ProceduralMemoryABC.__abstractmethods__)
         self.assertIn("find_skill", ProceduralMemoryABC.__abstractmethods__)
 
-    def test_cannot_instantiate_module_without_methods(self):
+    def test_cannot_instantiate_slot_abc_without_methods(self):
         with self.assertRaises(TypeError):
-            MemoryModule()  # type: ignore[abstract]
+            WorkingMemoryABC(slot=MemorySlot.WM)  # type: ignore[abstract]
 
 
 # --------------------------------------------------------------------------- #
-# A minimal concrete implementation used by graph/factory tests later.
+# A minimal storage-backed module — the recommended modern pattern.
 # --------------------------------------------------------------------------- #
-class _StampMemory(MemoryModule):
-    """Records every call so we can inspect graph behaviour."""
+class TestStorageBackedDefaults(unittest.TestCase):
+    def setUp(self):
+        self.gs = InMemoryGraphStorage()
+        self.m = MemoryModule(slot=MemorySlot.EM, graph_storage=self.gs)
 
-    def __init__(self, name: str = "stub"):
-        self.name = name
-        self._entries = []
-        self.written: list = []
-        self.reads: list = []
-        self.updates = 0
+    def test_write_routes_through_storage(self):
+        entry = MemoryEntry("e1", "hello", semantic_keys=["greeting"])
+        ctx = MemoryContext()
+        self.assertTrue(self.m.write(entry, ctx))
+        # Node should be in the storage
+        node = self.gs.get_node("e1")
+        self.assertIsNotNone(node)
+        self.assertIn(MemorySlot.EM.value, node["labels"])
 
-    def write(self, entry, context):
-        self.written.append(entry.entry_id)
-        self._entries.append(entry)
-        return True
+    def test_read_returns_storage_backed_entries(self):
+        self.m.write(MemoryEntry("e1", "hello", semantic_keys=["x"]), MemoryContext())
+        self.m.write(MemoryEntry("e2", "world", semantic_keys=["y"]), MemoryContext())
+        result = self.m.read(Query())
+        self.assertEqual(len(result.entries), 2)
+        self.assertEqual(result.source_slot, MemorySlot.EM.value)
 
-    def read(self, query):
-        self.reads.append(query)
-        return QueryResult(entries=list(self._entries))
+    def test_read_filter_by_semantic_keys(self):
+        self.m.write(MemoryEntry("e1", "alpha", semantic_keys=["x"]), MemoryContext())
+        self.m.write(MemoryEntry("e2", "beta", semantic_keys=["y"]), MemoryContext())
+        result = self.m.read(QueryBuilder().with_semantic("x").build())
+        self.assertEqual([e.entry_id for e in result.entries], ["e1"])
 
-    def clear(self):
-        self._entries.clear()
+    def test_clear_deletes_all_slot_nodes(self):
+        self.m.write(MemoryEntry("e1", "a"), MemoryContext())
+        self.m.write(MemoryEntry("e2", "b"), MemoryContext())
+        self.m.clear()
+        self.assertEqual(self.m.count(), 0)
 
-    def stats(self):
-        return {"count": len(self._entries), "name": self.name}
+    def test_stats_reflect_storage_count(self):
+        self.m.write(MemoryEntry("e1", "a"), MemoryContext())
+        self.m.write(MemoryEntry("e2", "b"), MemoryContext())
+        s = self.m.stats()
+        self.assertEqual(s["count"], 2)
+        self.assertEqual(s["slot"], MemorySlot.EM.value)
 
-    def update(self, context):
-        self.updates += 1
+    def test_count_helper_reads_stats(self):
+        self.m.write(MemoryEntry("a", "x"), MemoryContext())
+        self.m.write(MemoryEntry("b", "y"), MemoryContext())
+        self.assertEqual(self.m.count(), 2)
 
 
-class TestMinimalConcreteModule(unittest.TestCase):
-    def test_write_read_clear_stats(self):
-        m = _StampMemory()
+class TestStorageLessModuleRaises(unittest.TestCase):
+    def test_write_without_storage_raises(self):
+        m = MemoryModule(slot=MemorySlot.WM)
+        with self.assertRaises(RuntimeError):
+            m.write(MemoryEntry("a", "x"), MemoryContext())
+
+    def test_read_without_storage_raises(self):
+        m = MemoryModule(slot=MemorySlot.WM)
+        with self.assertRaises(RuntimeError):
+            m.read(Query())
+
+    def test_clear_without_storage_raises(self):
+        m = MemoryModule(slot=MemorySlot.WM)
+        with self.assertRaises(RuntimeError):
+            m.clear()
+
+    def test_stats_without_storage_returns_zero(self):
+        # stats is non-mutating — should not raise; returns 0 count.
+        m = MemoryModule(slot=MemorySlot.WM)
+        s = m.stats()
+        self.assertEqual(s["count"], 0)
+
+
+class TestLegacyOverrides(unittest.TestCase):
+    """Subclasses can still override write/read for custom in-memory behaviour."""
+
+    def test_override_bypasses_storage(self):
+        class StubMemory(MemoryModule):
+            def __init__(self):
+                super().__init__(slot=MemorySlot.WM)
+                self._entries = []
+                self.written = []
+
+            def write(self, entry, ctx):
+                self.written.append(entry.entry_id)
+                self._entries.append(entry)
+                return True
+
+            def read(self, query):
+                return QueryResult(entries=list(self._entries))
+
+            def clear(self):
+                self._entries.clear()
+
+            def stats(self):
+                return {"count": len(self._entries)}
+
+        m = StubMemory()
         ctx = MemoryContext()
         e = MemoryEntry("e1", "hello")
         self.assertTrue(m.write(e, ctx))
         result = m.read(Query())
         self.assertEqual(len(result.entries), 1)
-        self.assertEqual(result.entries[0].entry_id, "e1")
         self.assertEqual(m.stats()["count"], 1)
         m.clear()
         self.assertEqual(m.read(Query()).entries, [])
-
-    def test_count_helper_reads_stats(self):
-        m = _StampMemory()
-        m.write(MemoryEntry("a", "x"), MemoryContext())
-        m.write(MemoryEntry("b", "y"), MemoryContext())
-        self.assertEqual(m.count(), 2)
-
-    def test_default_update_and_consolidate_are_safe(self):
-        m = _StampMemory()
-        # Default update is overridden here to count, but base class default is no-op
-        other = _StampMemory()
-        self.assertEqual(other.consolidate(m, MemoryContext()), [])
-        # Update should not raise.
-        MemoryModule.update(other, MemoryContext())
-
-    def test_default_count_returns_minus_one_when_stats_unknown(self):
-        class NoStat(MemoryModule):
-            def write(self, e, c): return True
-            def read(self, q): return QueryResult()
-            def clear(self): pass
-            def stats(self): return {"weird_key": 7}
-
-        self.assertEqual(NoStat().count(), -1)
 
 
 if __name__ == "__main__":

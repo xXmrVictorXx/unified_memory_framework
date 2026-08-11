@@ -1,23 +1,13 @@
-"""CLiViS ``TimeWorkingMemory`` — episodic short-term evidence store.
+"""CLiViS ``TimeWorkingMemory`` — storage-backed episodic short-term store.
 
-Faithful re-implementation of ``reproduce/CLiViS/clivis/memory/time_working_memory.py``.
+A thin facade over :class:`~unimem.graph_storage.base.GraphStorage` that
+preserves CLiViS's high-level API (question, chat history, rationale list)
+without subclassing any unimem slot ABC. It still inherits from
+:class:`~unimem.core.module.MemoryModule` so the
+:class:`~unimem.graph.graph.MemoryGraph` can host it as a node.
 
-Original semantics (per the explore analysis):
-* Stores the question, the chat history (OpenAI-format dicts), and a list of
-  ``Rationale`` evidence entries.
-* Each ``Rationale`` is a structured evidence chunk with free-text body plus
-  spatial (``related_area``), temporal (``related_period``), and optional
-  object tags.
-* The pipeline appends a (LLM instruction, VLM response) pair per round, then
-  extracts a new rationale via an LLM call.
-
-This module exposes both the original API (``update_history_msg``,
-``extract_and_update_rationale_list``, ``output_memory_info``) and the unimem
-ABC API (``write`` / ``read`` / ``get_current`` / ``set_current`` /
-``append_event`` / ``get_timeline``).
-
-The LLM extractor is injectable. Tests use ``MockLLM``; production wiring
-passes a callable that wraps Qwen / DeepSeek / GPT.
+Each rationale is stored as a node ``:working_memory:Rationale`` with a
+``:TimeIndex`` node attached via ``:AT_TIME`` (period parsed to seconds).
 """
 from __future__ import annotations
 
@@ -27,8 +17,11 @@ from typing import Any, Callable, Dict, List, Optional
 
 from unimem.core.context import MemoryContext
 from unimem.core.entry import MemoryEntry
+from unimem.core.module import MemoryModule
 from unimem.core.query import Query, QueryResult
-from unimem.core.slot_abc import EpisodicMemoryABC, WorkingMemoryABC
+from unimem.core.slots import MemorySlot
+from unimem.graph_storage import GraphStorage, InMemoryGraphStorage
+from unimem.graph_storage.time_index import attach_period
 
 LLMFn = Callable[[str], str]
 
@@ -37,10 +30,7 @@ LLMFn = Callable[[str], str]
 # Rationale
 # --------------------------------------------------------------------------- #
 class Rationale:
-    """One piece of evidence linked to a (period, area, object).
-
-    Mirrors ``reproduce/CLiViS/clivis/memory/time_working_memory.py:Rationale``.
-    """
+    """One piece of evidence linked to a (period, area, object)."""
 
     __slots__ = ("evidence", "related_area", "related_period", "related_obj")
 
@@ -65,38 +55,40 @@ class Rationale:
         }
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
-        return f"Rationale(area={self.related_area!r}, period={self.related_period!r}, obj={self.related_obj!r})"
+        return (
+            f"Rationale(area={self.related_area!r}, "
+            f"period={self.related_period!r}, obj={self.related_obj!r})"
+        )
 
 
-# --------------------------------------------------------------------------- #
-# TimeWorkingMemory
-# --------------------------------------------------------------------------- #
-class TimeWorkingMemory(WorkingMemoryABC, EpisodicMemoryABC):
+class TimeWorkingMemory(MemoryModule):
     """CLiViS working memory: question + chat history + rationale list.
 
-    Implementation notes:
-
-    * The unimem ``MemoryEntry`` text is the rationale evidence. ``metadata``
-      carries area/period/object so the multi-axis index can retrieve by
-      them via ``semantic_keys`` (area/object) and ``temporal_keys`` (period
-      parsed to seconds).
-    * ``write`` accepts an entry and routes it as a rationale append.
-    * The "current" WorkingMemoryABC entry is the last appended rationale
-      (or, before any rounds, the question itself as a placeholder).
+    Rationales are persisted to the bound :class:`GraphStorage` so the
+    pipeline can introspect them via Cypher queries if desired. The legacy
+    in-memory attributes (``rationale_list`` / ``history_messages``) are
+    preserved for compatibility with the existing pipeline code.
     """
 
-    timescales = (1.0, 60.0)  # short-term + medium-term buckets
+    SLOT = MemorySlot.WM
 
     def __init__(
         self,
         question: str = "",
         messages: Optional[List[Dict[str, str]]] = None,
         llm_extractor: Optional[LLMFn] = None,
+        graph_storage: Optional[GraphStorage] = None,
     ) -> None:
+        super().__init__(slot=self.SLOT)
         self.question = question
         self.history_messages: List[Dict[str, str]] = list(messages) if messages else []
         self.rationale_list: List[Rationale] = []
         self._llm_extractor = llm_extractor
+        self._gs = graph_storage or InMemoryGraphStorage()
+
+    @property
+    def graph_storage(self) -> GraphStorage:
+        return self._gs
 
     # ------------------------------------------------------------------ #
     # Original CLiViS API
@@ -114,17 +106,6 @@ class TimeWorkingMemory(WorkingMemoryABC, EpisodicMemoryABC):
         extractor: Optional[LLMFn] = None,
         max_retries: int = 5,
     ) -> Optional[Rationale]:
-        """Use the LLM to extract a new rationale from the latest dialogue turn.
-
-        Reproduces ``TimeWorkingMemory.extract_and_update_rationale_list``:
-        builds a prompt from the last (instruction, response) pair, asks the
-        LLM for an evidence summary, parses it into a :class:`Rationale`.
-        Returns the new Rationale (also appended to the list) or None on
-        failure / empty extraction.
-
-        The extractor can be passed per-call (production) or set at
-        construction time (tests).
-        """
         fn = extractor or self._llm_extractor
         if fn is None:
             raise RuntimeError(
@@ -152,11 +133,10 @@ class TimeWorkingMemory(WorkingMemoryABC, EpisodicMemoryABC):
             related_period=period,
             related_obj=parsed.get("related_obj"),
         )
-        self.rationale_list.append(rat)
+        self._append_rationale(rat)
         return rat
 
     def output_memory_info(self) -> str:
-        """Pretty-serialise the entire working memory for LLM context."""
         lines = [f"Question: {self.question}", "Rationales:"]
         for i, r in enumerate(self.rationale_list):
             line = f"  [{i}] area={r.related_area} period={r.related_period}"
@@ -169,90 +149,53 @@ class TimeWorkingMemory(WorkingMemoryABC, EpisodicMemoryABC):
         return "\n".join(lines)
 
     # ------------------------------------------------------------------ #
-    # WorkingMemoryABC
-    # ------------------------------------------------------------------ #
-    def get_current(self) -> Optional[MemoryEntry]:
-        if self.rationale_list:
-            r = self.rationale_list[-1]
-            return self._rationale_to_entry(r, len(self.rationale_list) - 1)
-        if self.question:
-            return MemoryEntry(
-                entry_id="question",
-                text=self.question,
-                source_slot="working_memory",
-            )
-        return None
-
-    def set_current(self, entry: MemoryEntry) -> None:
-        # WorkingMemory.set_current in CLiViS just replaces the latest
-        # rationale. We accept any entry, but treat its metadata fields
-        # as authoritative.
-        rat = Rationale(
-            evidence=entry.text,
-            related_area=entry.metadata.get("related_area", ""),
-            related_period=entry.metadata.get("related_period", ""),
-            related_obj=entry.metadata.get("related_obj"),
-        )
-        if self.rationale_list:
-            self.rationale_list[-1] = rat
-        else:
-            self.rationale_list.append(rat)
-
-    # ------------------------------------------------------------------ #
-    # EpisodicMemoryABC
+    # Storage integration
     # ------------------------------------------------------------------ #
     def append_event(self, entry: MemoryEntry) -> None:
-        rat = Rationale(
+        """Append a rationale from a MemoryEntry (legacy episodic API)."""
+        self._append_rationale(Rationale(
             evidence=entry.text,
             related_area=entry.metadata.get("related_area", ""),
             related_period=entry.metadata.get("related_period", ""),
             related_obj=entry.metadata.get("related_obj"),
-        )
+        ))
+
+    def _append_rationale(self, rat: Rationale) -> None:
         self.rationale_list.append(rat)
-
-    def get_timeline(
-        self, t_min: Optional[float] = None, t_max: Optional[float] = None
-    ) -> List[MemoryEntry]:
-        # Periods are strings in CLiViS; here we approximate by parsing
-        # seconds from the period string and filter on it.
-        out: List[MemoryEntry] = []
-        for i, r in enumerate(self.rationale_list):
-            t = _period_to_seconds(r.related_period)
-            if t is None:
-                continue
-            if t_min is not None and t < t_min:
-                continue
-            if t_max is not None and t > t_max:
-                continue
-            out.append(self._rationale_to_entry(r, i))
-        return out
-
-    # ------------------------------------------------------------------ #
-    # MemoryModule contract
-    # ------------------------------------------------------------------ #
-    def write(self, entry: MemoryEntry, context: MemoryContext) -> bool:
-        self.append_event(entry)
-        return True
-
-    def read(self, query: Query) -> QueryResult:
-        sem = set(query.semantic or [])
-        entries = []
-        for i, r in enumerate(self.rationale_list):
-            entry = self._rationale_to_entry(r, i)
-            if sem:
-                keys = set(entry.semantic_keys)
-                # AND semantics within axis: every queried key must be present
-                if not sem.issubset(keys):
-                    continue
-            entries.append(entry)
-        if query.top_k is not None:
-            entries = entries[: query.top_k]
-        return QueryResult(entries=entries, source_slot="working_memory")
-
-    def clear(self) -> None:
-        self.rationale_list.clear()
-        self.history_messages.clear()
-        self.question = ""
+        idx = len(self.rationale_list) - 1
+        node_id = f"rationale-{idx}"
+        semantic = []
+        if rat.related_area:
+            semantic.append(rat.related_area)
+        if rat.related_obj:
+            semantic.append(rat.related_obj)
+        self._gs.add_node(
+            node_id,
+            [self.SLOT.value, "Rationale"],
+            {
+                "text": rat.evidence,
+                "evidence": rat.evidence,
+                "related_area": rat.related_area,
+                "related_period": rat.related_period,
+                "related_obj": rat.related_obj or "",
+                "rationale_index": idx,
+            },
+        )
+        if rat.related_period:
+            # Parse start/end seconds from the period string so that the
+            # TimeIndex node can be queried via time_range / start_t / end_t.
+            from .navigation_graph import _parse_range_seconds
+            rng = _parse_range_seconds(rat.related_period)
+            if rng is not None:
+                attach_period(
+                    self._gs,
+                    node_id,
+                    rat.related_period,
+                    start_t=rng[0],
+                    end_t=rng[1],
+                )
+            else:
+                attach_period(self._gs, node_id, rat.related_period)
 
     def stats(self) -> Dict[str, Any]:
         return {
@@ -261,25 +204,49 @@ class TimeWorkingMemory(WorkingMemoryABC, EpisodicMemoryABC):
             "has_question": bool(self.question),
         }
 
+    def clear(self) -> None:
+        self.rationale_list.clear()
+        self.history_messages.clear()
+        self.question = ""
+        self._gs.query(
+            f"MATCH (n:{self.SLOT.value}) DETACH DELETE n"
+        )
+
     # ------------------------------------------------------------------ #
-    # Helpers
+    # MemoryModule contract — append rationale from entry
     # ------------------------------------------------------------------ #
+    def write(self, entry: MemoryEntry, context: MemoryContext) -> bool:
+        self._append_rationale(Rationale(
+            evidence=entry.text,
+            related_area=entry.metadata.get("related_area", ""),
+            related_period=entry.metadata.get("related_period", ""),
+            related_obj=entry.metadata.get("related_obj"),
+        ))
+        return True
+
+    def read(self, query: Query) -> QueryResult:
+        sem = set(query.semantic or [])
+        entries: List[MemoryEntry] = []
+        for i, r in enumerate(self.rationale_list):
+            entry = self._rationale_to_entry(r, i)
+            if sem and not sem.issubset(set(entry.semantic_keys)):
+                continue
+            entries.append(entry)
+        if query.top_k is not None:
+            entries = entries[: query.top_k]
+        return QueryResult(entries=entries, source_slot=self.SLOT.value)
+
     def _rationale_to_entry(self, r: Rationale, index: int) -> MemoryEntry:
         semantic = []
         if r.related_area:
             semantic.append(r.related_area)
         if r.related_obj:
             semantic.append(r.related_obj)
-        temporal = []
-        t = _period_to_seconds(r.related_period)
-        if t is not None:
-            temporal.append(t)
         return MemoryEntry(
             entry_id=f"rationale-{index}",
             text=r.evidence,
             semantic_keys=semantic,
-            temporal_keys=temporal,
-            source_slot="working_memory",
+            source_slot=self.SLOT.value,
             metadata={
                 "related_area": r.related_area,
                 "related_period": r.related_period,
@@ -296,7 +263,6 @@ def _period_to_seconds(period: str) -> Optional[float]:
     """Parse ``"hh:mm:ss - hh:mm:ss"`` to a float midpoint in seconds."""
     if not period:
         return None
-    # Find all hh:mm:ss patterns
     matches = re.findall(r"(\d+):(\d+):(\d+)", period)
     if not matches:
         return None
@@ -305,11 +271,6 @@ def _period_to_seconds(period: str) -> Optional[float]:
 
 
 def _safe_json_extract(text: str) -> Optional[Dict[str, Any]]:
-    """Try to recover a JSON object from an LLM response.
-
-    LLMs often wrap JSON in ```json``` fences or trailing prose. We try:
-    direct json.loads, then the first {...} block, then JSON from a code fence.
-    """
     if not text:
         return None
     text = text.strip()
@@ -317,14 +278,12 @@ def _safe_json_extract(text: str) -> Optional[Dict[str, Any]]:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-    # Try first {...} block
     m = re.search(r"\{[^{}]*\}", text, re.DOTALL)
     if m:
         try:
             return json.loads(m.group(0))
         except json.JSONDecodeError:
             pass
-    # Try fenced ```json ... ```
     m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if m:
         try:
@@ -334,4 +293,9 @@ def _safe_json_extract(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-__all__ = ["Rationale", "TimeWorkingMemory", "_period_to_seconds", "_safe_json_extract"]
+__all__ = [
+    "Rationale",
+    "TimeWorkingMemory",
+    "_period_to_seconds",
+    "_safe_json_extract",
+]

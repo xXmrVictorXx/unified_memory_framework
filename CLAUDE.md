@@ -30,52 +30,93 @@
 
 - ✅ 文献调研（~55 篇，2025-2026 多记忆融合为主）
 - ✅ 通用记忆框架 v2 设计（6 槽位 + 3 横切机制）
-- ✅ 框架骨架实现：`unimem/` 包（纯 stdlib，149 测试全过）
+- ✅ 框架骨架实现：`unimem/` 包（v0.1：纯 stdlib，149 测试全过）
+- ✅ **持久化重构 v0.2**：`unimem/` 加入 `graph_storage/` + `vector_storage/` + `op_log.py` + `config.py`
+  - `MemoryModule` 改为 storage-backed 默认实现（4 抽象方法变默认实现）
+  - `MemoryGraph` 内置 `graph_storage` + `op_log` 参数，双写 + WAL
+  - `DedupPolicy` 实现 R4 Eq.5（向量 + 空间双阈值去重）
+  - 三复现方法（R4 / CLiViS / VideoHV）全部重写为 storage-backed facade，删除子类化
+  - 节点 label 约定：`MemorySlot.value` + 自定义子标签 + `:TimeIndex` + `:AT_TIME`
+  - 434 测试全过（unimem core 182 + graph_storage 40 + vector_storage 22 + reproductions 190）
 - 🔄 当前：将框架映射到记忆修正应用；分析每层在具体方法中的功能
 - ⏳ 下一步：定义修正模块接口；选择实验测试床（OpenEQA / HM3D / Habitat）；
   形式化错误类型学
 
 ## `unimem/` 框架（已实现）
 
-通用记忆框架的纯 Python 标准库实现。**零第三方依赖**，Python 3.9+ 兼容。
+通用记忆框架的 Python 实现。**默认纯 stdlib**（InMemoryGraphStorage / InMemoryVectorStorage / SQLiteOpLog），
+可选 Neo4j / Qdrant / PyYAML 后端。Python 3.9+ 兼容。
 
 ### 核心设计
 
 - **6 槽位**（`MemorySlot` 枚举）：`WM` / `SG` / `GM` / `EM` / `SM` / `PM`
+  - 槽位值 `MemorySlot.X.value` 直接作为图节点 label（核心约定）
 - **模块即节点**：每个 `MemoryModule` 实例是图中一个节点；数据流/沉淀/索引是边
 - **5 种边**（`EdgeKind`）：`FEEDS`（数据流）/ `CONSOLIDATES_TO`（沉淀）/ `INDEXES` / `REFERENCES` / `SUBSUMES`（层级）
 - **三个核心图算法**（`MemoryGraph`）：
   1. **扇出读** `read(query)` — 广播 query 到所有匹配 slot_filter 的节点，结果带溯源
   2. **扇入写** `write(entry, source)` — BFS 沿 FEEDS 边传播，VISITED 防环，三级写策略门控（边>模块>图默认）
   3. **沉淀遍历** `run_consolidation_pass(ctx)` — 沿 CONSOLIDATES_TO 提取并写入，后置遗忘扫描
+- **持久化（v0.2）**：`MemoryGraph` / `MemoryModule` 直接内置 `GraphStorage` + `OpLog`
+  - 双写：内存拓扑 + 后端存储；`MemoryGraph(graph_storage=gs, op_log=log)` 启用
+  - WAL：每次 `write` 前后写 OpLog，崩溃后可 replay（Neo4j MERGE / Qdrant upsert 幂等）
 
 ### 关键目录
 
 | 路径 | 内容 |
 |------|------|
-| `unimem/core/` | 数据类型（`MemoryEntry`/`MultiAxisIndex`/`Query`/`MemoryContext`）+ ABC（`MemoryModule` + 6 槽位 ABC） |
-| `unimem/graph/` | `MemoryGraph`（核心）+ `MemoryNode`/`MemoryEdge` + 声明式 `GraphSpec`/`MemoryGraphBuilder` |
-| `unimem/policies/` | 4 个横切策略 ABC：Write/Read/Consolidation/Forget（每个含默认实现） |
-| `unimem/factory/` | `Registry`（按 `(slot, impl_name)` 注册）+ `MemoryFactory` 门面 |
-| `unimem/reference/` | 唯一参考实现 `ListEpisodicMemory` + `FIFOForgetPolicy` + `ExtractFactsConsolidationPolicy` |
-| `unimem/tests/` | 9 个测试文件，149 测试；`test_plug_in.py` 是端到端 plug-in 场景 |
+| `unimem/core/` | 数据类型 + `MemoryModule`（**带 storage-backed 默认实现**）+ 6 个可选槽位 mixin |
+| `unimem/graph/` | `MemoryGraph`（核心，**已支持 storage + op_log**）+ `MemoryNode`/`MemoryEdge` + 声明式 `GraphSpec` |
+| `unimem/graph_storage/` | **新增**：`GraphStorage` ABC + `InMemoryGraphStorage` + `time_index.py`（TimeIndex 节点模式）+ 工厂 |
+| `unimem/vector_storage/` | **新增**：`VectorStorage` ABC + `InMemoryVectorStorage`（按需使用，非通用后端）+ 工厂 |
+| `unimem/op_log.py` | **新增**：`OpLog` ABC + `OpLogEntry` + `SQLiteOpLog`（stdlib）|
+| `unimem/config.py` | **新增**：`StorageConfig` + `ModuleSpec` + `load_config(yaml)` + `load_unimem` + `build_graph` |
+| `unimem/policies/` | 4 个横切策略 ABC：Write/Read/Consolidation/Forget + `DedupPolicy`（R4 Eq.5） |
+| `unimem/factory/` | `Registry`（按 `(slot, impl_name)` 注册，create_module 自动注入 slot）+ `MemoryFactory` 门面 |
+| `unimem/reference/` | `ListEpisodicMemory` + `FIFOForgetPolicy` + `ExtractFactsConsolidationPolicy` |
+| `unimem/tests/` | 12 个测试文件，182 测试；`test_storage_integration.py` 是 storage 集成场景 |
 
 ### 实现约定
 
-- **纯 stdlib 硬约束**：禁止 `import numpy/torch/networkx/scipy/...`。`MultiAxisIndex`、邻接表图都自己写
+- **核心 stdlib 硬约束**：`unimem/core/`、`unimem/graph/`、`unimem/policies/`、`unimem/op_log.py`、`InMemoryGraphStorage`、`InMemoryVectorStorage` 必须纯 stdlib
+- **可选依赖**：`neo4j`（Neo4jGraphStorage）、`qdrant-client`（QdrantVectorStorage）、`pyyaml`（config.py 的 YAML 加载）按需 lazy import
 - **Python 3.9 兼容**：所有文件 `from __future__ import annotations`；用 `typing.Optional/Dict/List/Tuple`，不用 `X | Y` 或运行时 `list[str]`
 - **测试用 `unittest`**（不用 pytest）
-- **运行测试**：`cd /home/eg4/pwttt/cdx && python -m unittest discover -s unimem/tests -v`
+- **运行测试**：
+  - `cd /home/eg4/pwttt/cdx && python -m unittest discover -s unimem/tests -v`（核心，182）
+  - `cd /home/eg4/pwttt/cdx && python -m unittest discover -s unimem/graph_storage/tests -v`（40）
+  - `cd /home/eg4/pwttt/cdx && python -m unittest discover -s unimem/vector_storage/tests -v`（22）
+  - `cd /home/eg4/pwttt/cdx && python -m unittest discover -s reproductions -v`（190）
 
 ### 关键设计决策（不要违背）
 
 1. **自定义图而非 networkx**：节点少（3-8 个）+ 边带类型与策略，邻接表足够
-2. **槽位 ABC 精简**：基类 4 抽象方法（`write/read/clear/stats`），每个槽位 ABC 仅加 2-3 个
-3. **沉淀策略挂在边而非模块**：同一 EM 可向 SM 抽事实、向 GM 抽空间模式
-4. **FEEDS 默认恒等传播**：边策略只门控不变换；变换由目标模块 `write()` 内部处理
-5. **`MultiAxisIndex` 是工具非强制**：场景图等模块可有自己的树结构
-6. **单一 Registry 按 `(slot, impl_name)`**：`list_implementations(slot)` 查询
-7. **`GraphSpec` dataclass + `from_dict`**：dataclass 便于 IDE，dict 便于 JSON/YAML 加载
+2. **`MemoryModule` 不再是 ABC**：4 个原抽象方法（write/read/clear/stats）现在有 storage-backed 默认实现。
+   传 `graph_storage` 即启用持久化；不传则子类须自己重写
+3. **槽位 ABC 是可选 mixin**：`WorkingMemoryABC` 等保留为 `MemoryModule + ABC`，子类可选继承
+4. **节点 label = `MemorySlot.value`**：6 个槽位值（`working_memory` / `scene_graph` / ...）作为图节点主 label；
+   `:ModuleNode` 是外层拓扑节点；`:TimeIndex` 是时间锚节点，通过 `:AT_TIME` 边连接记忆节点
+5. **沉淀策略挂在边而非模块**：同一 EM 可向 SM 抽事实、向 GM 抽空间模式
+6. **FEEDS 默认恒等传播**：边策略只门控不变换；变换由目标模块 `write()` 内部处理
+7. **`MultiAxisIndex` 是工具非强制**：场景图等模块可有自己的树结构
+8. **单一 Registry 按 `(slot, impl_name)`**：`list_implementations(slot)` 查询；
+   `create_module` 自动注入 slot 仅当子类 `__init__` 接受 slot 参数
+9. **`GraphSpec` dataclass + `from_dict`**：dataclass 便于 IDE，dict 便于 JSON/YAML 加载
+10. **VectorStorage 按需使用**：通用 `MemoryModule` **不**依赖向量存储；需要的方法（如 R4）显式实例化
+11. **OpLog 顶层独立**：`unimem/op_log.py` 的 SQLiteOpLog 用于跨后端原子性 + 审计；由 `MemoryGraph` 显式调用
+
+### 关键设计决策（不要违背）
+
+> 注：以下为旧的 v0.1 决策。最新 v0.2 决策见上文"关键设计决策（不要违背）"。
+> v0.2 中 `MemoryModule` 不再是 ABC；槽位 ABC 降级为可选 mixin；
+> 节点 label = `MemorySlot.value`；新增 storage / op_log / config / vector_storage。
+
+1. **自定义图而非 networkx**：节点少（3-8 个）+ 边带类型与策略，邻接表足够
+2. **沉淀策略挂在边而非模块**：同一 EM 可向 SM 抽事实、向 GM 抽空间模式
+3. **FEEDS 默认恒等传播**：边策略只门控不变换；变换由目标模块 `write()` 内部处理
+4. **`MultiAxisIndex` 是工具非强制**：场景图等模块可有自己的树结构
+5. **单一 Registry 按 `(slot, impl_name)`**：`list_implementations(slot)` 查询
+6. **`GraphSpec` dataclass + `from_dict`**：dataclass 便于 IDE，dict 便于 JSON/YAML 加载
 
 ## 关键设计原则（修正研究方向）
 

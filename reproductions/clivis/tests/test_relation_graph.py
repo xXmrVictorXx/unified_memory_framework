@@ -1,13 +1,11 @@
-"""Tests for CLiViS RelationGraph (pure-Python property graph)."""
+"""Tests for CLiViS RelationGraph (storage-backed property graph)."""
 from __future__ import annotations
 
 import unittest
 
 from reproductions.clivis.memory.relation_graph import NodeLabels, RelationGraph
-from unimem.core.context import MemoryContext
-from unimem.core.entry import MemoryEntry
-from unimem.core.query import QueryBuilder
-from unimem.core.slot_abc import SceneGraphMemoryABC, SemanticMemoryABC
+from unimem.core.slots import MemorySlot
+from unimem.graph_storage import InMemoryGraphStorage
 
 
 class TestNodeLabels(unittest.TestCase):
@@ -171,91 +169,128 @@ class TestSubgraphExtraction(unittest.TestCase):
         self.assertIn("key_nodes", j)
 
 
-class TestSceneGraphABC(unittest.TestCase):
-    def setUp(self):
-        self.rg = RelationGraph()
+class TestStorageBackedRelationGraph(unittest.TestCase):
+    """Verify the rewrite delegates to GraphStorage + slot label conventions."""
 
-    def test_is_scene_graph_abc(self):
-        self.assertIsInstance(self.rg, SceneGraphMemoryABC)
+    def test_default_storage_is_in_memory(self):
+        rg = RelationGraph()
+        self.assertIsInstance(rg.graph_storage, InMemoryGraphStorage)
 
-    def test_add_object_with_parent(self):
-        self.rg.add_area("kitchen", "00:00:00-00:00:30", "")
-        self.assertTrue(self.rg.add_object("cup", parent_id="kitchen"))
-        self.assertEqual(self.rg.get_children("kitchen"), ["cup"])
+    def test_nodes_get_scene_graph_slot_label(self):
+        rg = RelationGraph()
+        rg.add_person("alice", "host")
+        node = rg.graph_storage.get_node("alice")
+        self.assertIsNotNone(node)
+        self.assertIn(MemorySlot.SG.value, node["labels"])
+        self.assertIn("Person", node["labels"])
 
-    def test_get_children_roots(self):
-        self.rg.add_area("kitchen", "00:00:00-00:00:30", "")
-        self.rg.add_object("cup", parent_id="kitchen")
-        # Roots = nodes without incoming CONTAINS
-        roots = self.rg.get_children(None)
-        self.assertIn("kitchen", roots)
-        self.assertNotIn("cup", roots)
+    def test_external_storage_can_be_injected(self):
+        gs = InMemoryGraphStorage()
+        rg = RelationGraph(graph_storage=gs)
+        rg.add_person("alice", "info")
+        # Same backend
+        self.assertIs(rg.graph_storage, gs)
+        self.assertIsNotNone(gs.get_node("alice"))
 
-    def test_get_object_by_id(self):
-        self.rg.add_object("cup", label="Object", color="red")
-        info = self.rg.get_object_by_id("cup")
-        self.assertEqual(info["color"], "red")
-
-
-class TestSemanticMemoryABC(unittest.TestCase):
-    def setUp(self):
-        self.rg = RelationGraph()
-        self.rg.add_person("alice", "")
-        self.rg.add_area("kitchen", "00:00:00-00:00:30", "")
-
-    def test_is_semantic_abc(self):
-        self.assertIsInstance(self.rg, SemanticMemoryABC)
-
-    def test_add_fact_and_query(self):
-        self.rg.add_fact("alice", "located_in", "kitchen")
-        facts = self.rg.query_facts()
-        self.assertEqual(len(facts), 1)
-        self.assertEqual(facts[0], ("alice", "located_in", "kitchen"))
-
-    def test_query_with_filters(self):
-        self.rg.add_fact("alice", "located_in", "kitchen")
-        self.rg.add_fact("alice", "holds", "cup")
-        self.assertEqual(len(self.rg.query_facts(predicate="located_in")), 1)
-        self.assertEqual(len(self.rg.query_facts(subject="alice")), 2)
-        # Filter by obj
-        self.assertEqual(len(self.rg.query_facts(obj="cup")), 1)
-
-
-class TestMemoryEntryBridge(unittest.TestCase):
-    def setUp(self):
-        self.rg = RelationGraph()
-
-    def test_write_node(self):
-        e = MemoryEntry(
-            "n1", "info text",
-            metadata={"kind": "node", "name": "alice", "label": "Person"},
+    def test_relations_are_typed_edges(self):
+        rg = RelationGraph()
+        rg.add_area("kitchen", "00:00:00-00:00:30", "")
+        rg.add_update_objects("cup", "00:00:00-00:00:30", "")
+        rg.add_relation("kitchen", "cup", "CONTAINS", "info", "00:00:00-00:00:30")
+        # The CONTAINS edge should be queryable via Cypher
+        rows = rg.graph_storage.query(
+            "MATCH (a)-[r:CONTAINS]->(b) RETURN a, b"
         )
-        self.assertTrue(self.rg.write(e, MemoryContext()))
-        self.assertEqual(self.rg.get_node_info("alice")["label"], "Person")
+        self.assertEqual(len(rows), 1)
 
-    def test_write_relation(self):
-        self.rg.add_update_node("a", "Area")
-        self.rg.add_update_node("b", "Object")
-        e = MemoryEntry(
-            "r1", "rel info",
-            metadata={"kind": "relation", "source": "a", "target": "b", "type": "CONTAINS"},
+    def test_action_creates_performs_edge(self):
+        rg = RelationGraph()
+        rg.add_person("alice", "")
+        rg.add_update_objects("cup", "00:00:00-00:00:30", "")
+        action_id = rg.add_action(
+            action_name="pours_coffee",
+            action_info="alice pours coffee",
+            time_range="00:00:00-00:00:30",
+            node_agent_name="alice",
+            node_patient_name="cup",
         )
-        self.assertTrue(self.rg.write(e, MemoryContext()))
-        self.assertEqual(self.rg.count_triples(), 1)
+        # Action should have a PERFORMS edge to alice
+        neighbours = rg.graph_storage.get_neighbors(action_id, "PERFORMS", "out")
+        self.assertEqual(len(neighbours), 1)
+        self.assertEqual(neighbours[0][0], "alice")
+        # And AFFECTS edge to cup
+        neighbours = rg.graph_storage.get_neighbors(action_id, "AFFECTS", "out")
+        self.assertEqual(len(neighbours), 1)
+        self.assertEqual(neighbours[0][0], "cup")
 
-    def test_read_no_filter_returns_all_nodes(self):
-        self.rg.add_person("alice", "")
-        self.rg.add_area("kitchen", "00:00:00-00:00:30", "")
-        result = self.rg.read(QueryBuilder().build())
-        self.assertEqual(len(result.entries), 2)
+    def test_action_chain_via_next_action_edges(self):
+        rg = RelationGraph()
+        rg.add_person("alice", "")
+        a1 = rg.add_action(
+            "enter", "", "00:00:00-00:00:10", node_agent_name="alice"
+        )
+        a2 = rg.add_action(
+            "sit", "", "00:00:10-00:00:20",
+            node_agent_name="alice", prev_action_id=a1,
+        )
+        chain = rg.get_action_chain()
+        self.assertEqual(chain, [a1, a2])
 
-    def test_read_with_semantic_returns_matching_facts(self):
-        self.rg.add_person("alice", "")
-        self.rg.add_area("kitchen", "00:00:00-00:00:30", "")
-        self.rg.add_relation("alice", "kitchen", "located_in", "", "00:00:00-00:00:30")
-        result = self.rg.read(QueryBuilder().with_semantic("located_in").build())
-        self.assertEqual(len(result.entries), 1)
-        self.assertIn("located_in", result.entries[0].text)
+    def test_all_node_names(self):
+        rg = RelationGraph()
+        rg.add_person("alice", "")
+        rg.add_area("kitchen", "00:00:00-00:00:30", "")
+        rg.add_update_objects("cup", "00:00:00-00:00:30", "")
+        names = set(rg.all_node_names())
+        self.assertEqual(names, {"alice", "kitchen", "cup"})
+
+    def test_stats_report_per_label_counts(self):
+        rg = RelationGraph()
+        rg.add_person("alice", "")
+        rg.add_person("bob", "")
+        rg.add_area("kitchen", "00:00:00-00:00:30", "")
+        s = rg.stats()
+        self.assertEqual(s["per_label"].get("Person"), 2)
+        self.assertEqual(s["per_label"].get("Area"), 1)
+
+    def test_clear_removes_all_nodes(self):
+        rg = RelationGraph()
+        rg.add_person("alice", "")
+        rg.add_area("kitchen", "00:00:00-00:00:30", "")
+        rg.clear()
+        self.assertEqual(len(rg.all_node_names()), 0)
+
+
+class TestCypherQueries(unittest.TestCase):
+    """Verify Cypher-style queries against the storage backend work."""
+
+    def setUp(self):
+        self.rg = RelationGraph()
+        self.rg.add_person("alice", "host")
+        self.rg.add_area("kitchen", "00:00:00-00:00:30", "cooking area")
+        self.rg.add_update_objects("cup", "00:00:00-00:00:30", "red")
+        self.rg.add_relation("kitchen", "cup", "CONTAINS", "", "00:00:00-00:00:30")
+
+    def test_match_by_label(self):
+        rows = self.rg.graph_storage.query(
+            f"MATCH (n:Person) RETURN n"
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["n"]["node_id"], "alice")
+
+    def test_match_with_where(self):
+        rows = self.rg.graph_storage.query(
+            f"MATCH (n:Object) WHERE n.info = 'red' RETURN n"
+        )
+        self.assertEqual(len(rows), 1)
+
+    def test_match_by_edge_type(self):
+        rows = self.rg.graph_storage.query(
+            "MATCH (a)-[r:CONTAINS]->(b) RETURN a, b"
+        )
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["a"]["node_id"], "kitchen")
+        self.assertEqual(rows[0]["b"]["node_id"], "cup")
 
 
 if __name__ == "__main__":

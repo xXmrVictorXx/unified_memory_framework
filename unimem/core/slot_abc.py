@@ -1,17 +1,20 @@
-"""Slot-specialised ABCs.
+"""Slot-specialised ABCs (optional mixins).
 
-Each slot ABC extends :class:`MemoryModule` and adds only 2–3 slot-specific
-methods on top. A concrete implementation picks **one** slot ABC to inherit
-from; the base contract is unchanged.
+Each slot ABC extends :class:`MemoryModule` (and ``ABC``) and adds only 2–3
+slot-specific abstract methods on top. A concrete implementation picks
+**one** slot ABC to inherit from to gain both the storage-backed
+``write`` / ``read`` / ``clear`` / ``stats`` defaults and the slot-specific
+convenience method contract (e.g. ``add_object`` for a scene graph).
 
-The methods here cover the small set of operations that *every* module
-claiming a given slot should support natively (e.g. a scene graph that can't
-answer "children of node X" is not really a scene graph). They are kept
-intentionally minimal — anything fancier goes through ``write``/``read``.
+These mixins are **optional** — modules that only need the storage-backed
+defaults can subclass :class:`MemoryModule` directly without inheriting a
+slot ABC. The slot ABCs exist for the (common) case where you want the
+framework to enforce that a scene-graph module really implements
+``get_children`` etc.
 """
 from __future__ import annotations
 
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .entry import MemoryEntry
@@ -21,7 +24,7 @@ from .module import MemoryModule
 # --------------------------------------------------------------------------- #
 # WM — working memory
 # --------------------------------------------------------------------------- #
-class WorkingMemoryABC(MemoryModule):
+class WorkingMemoryABC(MemoryModule, ABC):
     """Short-lived scratchpad: current observation, task state, recent context."""
 
     @abstractmethod
@@ -36,7 +39,7 @@ class WorkingMemoryABC(MemoryModule):
 # --------------------------------------------------------------------------- #
 # SG — scene graph
 # --------------------------------------------------------------------------- #
-class SceneGraphMemoryABC(MemoryModule):
+class SceneGraphMemoryABC(MemoryModule, ABC):
     """Hierarchical object-relation topology (floor → room → object → ...)."""
 
     @abstractmethod
@@ -60,7 +63,7 @@ class SceneGraphMemoryABC(MemoryModule):
 # --------------------------------------------------------------------------- #
 # GM — spatial / geometric
 # --------------------------------------------------------------------------- #
-class SpatialGeometricMemoryABC(MemoryModule):
+class SpatialGeometricMemoryABC(MemoryModule, ABC):
     """Metric / topological map: occupancy, regions, navigability."""
 
     @abstractmethod
@@ -77,7 +80,7 @@ class SpatialGeometricMemoryABC(MemoryModule):
 # --------------------------------------------------------------------------- #
 # EM — episodic
 # --------------------------------------------------------------------------- #
-class EpisodicMemoryABC(MemoryModule):
+class EpisodicMemoryABC(MemoryModule, ABC):
     """Time-ordered events / observation sequences.
 
     Implementations expose ``timescales`` (a tuple of bucket sizes in seconds)
@@ -103,7 +106,7 @@ class EpisodicMemoryABC(MemoryModule):
 # --------------------------------------------------------------------------- #
 # SM — semantic / knowledge
 # --------------------------------------------------------------------------- #
-class SemanticMemoryABC(MemoryModule):
+class SemanticMemoryABC(MemoryModule, ABC):
     """Facts / rules / common sense, accessed via (subject, predicate, object)."""
 
     @abstractmethod
@@ -123,7 +126,7 @@ class SemanticMemoryABC(MemoryModule):
 # --------------------------------------------------------------------------- #
 # PM — procedural / skill
 # --------------------------------------------------------------------------- #
-class ProceduralMemoryABC(MemoryModule):
+class ProceduralMemoryABC(MemoryModule, ABC):
     """Action policies / capability profile, keyed by trigger."""
 
     @abstractmethod

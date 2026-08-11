@@ -80,7 +80,18 @@ class Registry:
         impl_name: str,
         **kwargs: Any,
     ) -> MemoryModule:
-        """Instantiate the ``(slot, impl_name)`` module with ``kwargs``."""
+        """Instantiate the ``(slot, impl_name)`` module with ``kwargs``.
+
+        The ``slot`` argument is auto-injected into ``kwargs`` (as the slot
+        enum) when (a) the caller did not supply it and (b) the registered
+        class's ``__init__`` accepts it. This means a registered module
+        class that uses the default :class:`MemoryModule` constructor
+        signature can be created without repeating the slot explicitly,
+        while legacy classes with their own ``__init__`` (e.g.
+        ``FakeEpisodic(capacity=...)``) continue to work unchanged.
+        """
+        import inspect
+
         slot_member = MemorySlot.from_value(slot)
         cls = self._modules.get((slot_member, impl_name))
         if cls is None:
@@ -88,6 +99,13 @@ class Registry:
                 f"No module registered for ({slot_member.name!r}, {impl_name!r}). "
                 f"Available: {self.list_implementations(slot_member)}"
             )
+        if "slot" not in kwargs:
+            try:
+                sig = inspect.signature(cls.__init__)
+                if "slot" in sig.parameters:
+                    kwargs = {**kwargs, "slot": slot_member}
+            except (TypeError, ValueError):
+                pass
         return cls(**kwargs)
 
     def is_registered(

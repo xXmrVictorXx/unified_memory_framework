@@ -9,7 +9,8 @@ that motivated them):
   cross-references, and hierarchy are *edges*.
 * The framework defines **interface contracts only**; concrete implementations
   plug in their own storage and algorithms.
-* Pure stdlib, Python 3.9+.
+* Pluggable storage backends (in-memory, Neo4j, Qdrant) via
+  :mod:`unimem.graph_storage` + :mod:`unimem.vector_storage`.
 
 Quick start::
 
@@ -18,6 +19,7 @@ Quick start::
         MemoryGraph, MemoryNode, MemoryEdge, EdgeKind,
         Registry, MemoryGraphBuilder, GraphSpec, NodeSpec, EdgeSpec,
         ListEpisodicMemory, FIFOForgetPolicy, ExtractFactsConsolidationPolicy,
+        create_graph_storage, create_vector_storage, DedupPolicy,
     )
 """
 from __future__ import annotations
@@ -53,6 +55,7 @@ from .policies.forget_policy import ForgetPolicy, NoOp
 from .policies.read_policy import ConcatRead, FirstNonEmptyRead, ReadPolicy
 from .policies.write_policy import (
     AlwaysWrite,
+    DedupPolicy,
     LambdaWritePolicy,
     NeverWrite,
     WritePolicy,
@@ -63,7 +66,36 @@ from .reference.consolidate_extract import ExtractFactsConsolidationPolicy
 from .reference.episodic_memory import ListEpisodicMemory
 from .reference.forget_fifo import FIFOForgetPolicy
 
-__version__ = "0.1.0"
+# Storage backends
+from .graph_storage import (
+    GraphStorage,
+    InMemoryGraphStorage,
+    create_graph_storage,
+)
+from .vector_storage import (
+    InMemoryVectorStorage,
+    VectorStorage,
+    create_vector_storage,
+)
+
+# Op log
+from .op_log import OpLog, OpLogEntry, SQLiteOpLog
+
+# Config
+from .config import (
+    EdgeSpec as ConfigEdgeSpec,  # noqa: F401 — re-export alias
+)
+from .config import (
+    ModuleSpec,
+    StorageConfig,
+    UnimemConfig,
+    build_graph,
+    build_storage,
+    load_config,
+    load_unimem,
+)
+
+__version__ = "0.2.0"
 
 __all__ = [
     # core
@@ -98,6 +130,7 @@ __all__ = [
     "AlwaysWrite",
     "NeverWrite",
     "LambdaWritePolicy",
+    "DedupPolicy",
     "ReadPolicy",
     "ConcatRead",
     "FirstNonEmptyRead",
@@ -109,6 +142,25 @@ __all__ = [
     "ListEpisodicMemory",
     "FIFOForgetPolicy",
     "ExtractFactsConsolidationPolicy",
+    # storage
+    "GraphStorage",
+    "InMemoryGraphStorage",
+    "create_graph_storage",
+    "VectorStorage",
+    "InMemoryVectorStorage",
+    "create_vector_storage",
+    # op log
+    "OpLog",
+    "OpLogEntry",
+    "SQLiteOpLog",
+    # config
+    "ModuleSpec",
+    "StorageConfig",
+    "UnimemConfig",
+    "build_graph",
+    "build_storage",
+    "load_config",
+    "load_unimem",
     # meta
     "__version__",
 ]

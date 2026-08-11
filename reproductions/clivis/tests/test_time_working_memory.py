@@ -1,4 +1,4 @@
-"""Tests for CLiViS TimeWorkingMemory."""
+"""Tests for CLiViS TimeWorkingMemory (storage-backed)."""
 from __future__ import annotations
 
 import unittest
@@ -10,10 +10,9 @@ from reproductions.clivis.memory.time_working_memory import (
     _period_to_seconds,
     _safe_json_extract,
 )
-from unimem.core.context import MemoryContext
 from unimem.core.entry import MemoryEntry
-from unimem.core.query import QueryBuilder
-from unimem.core.slot_abc import EpisodicMemoryABC, WorkingMemoryABC
+from unimem.core.slots import MemorySlot
+from unimem.graph_storage import InMemoryGraphStorage
 
 
 class TestRationale(unittest.TestCase):
@@ -48,25 +47,13 @@ class TestSafeJsonExtract(unittest.TestCase):
         self.assertIsNone(_safe_json_extract(""))
 
 
-class TestTimeWorkingMemoryABC(unittest.TestCase):
-    def test_is_working_and_episodic(self):
-        m = TimeWorkingMemory(question="q")
-        self.assertIsInstance(m, WorkingMemoryABC)
-        self.assertIsInstance(m, EpisodicMemoryABC)
-
-    def test_get_current_returns_question_when_empty(self):
+class TestTimeWorkingMemoryBasic(unittest.TestCase):
+    def test_constructor_defaults(self):
         m = TimeWorkingMemory(question="where is the cup?")
-        cur = m.get_current()
-        self.assertIsNotNone(cur)
-        self.assertEqual(cur.text, "where is the cup?")
-
-    def test_get_current_returns_latest_rationale(self):
-        m = TimeWorkingMemory(question="q")
-        m.append_event(MemoryEntry(
-            "r1", "evidence", metadata={"related_area": "kitchen", "related_period": "00:00:05-00:00:10"}
-        ))
-        cur = m.get_current()
-        self.assertEqual(cur.entry_id, "rationale-0")
+        self.assertEqual(m.question, "where is the cup?")
+        self.assertEqual(m.history_messages, [])
+        self.assertEqual(m.rationale_list, [])
+        self.assertIsInstance(m.graph_storage, InMemoryGraphStorage)
 
     def test_update_history_msg_appends_pair(self):
         m = TimeWorkingMemory(question="q")
@@ -104,40 +91,40 @@ class TestTimeWorkingMemoryABC(unittest.TestCase):
         self.assertIsNone(m.extract_and_update_rationale_list("p"))
 
 
-class TestTimeWorkingMemoryReadWrite(unittest.TestCase):
+class TestTimeWorkingMemoryStorage(unittest.TestCase):
     def setUp(self):
         self.m = TimeWorkingMemory(question="where is the cup?")
-        self.m.append_event(MemoryEntry(
-            "r1", "cup on table",
-            metadata={"related_area": "kitchen", "related_period": "00:00:05-00:00:10", "related_obj": "cup"}
-        ))
-        self.m.append_event(MemoryEntry(
-            "r2", "sofa in living room",
-            metadata={"related_area": "living", "related_period": "00:00:15-00:00:20", "related_obj": "sofa"}
-        ))
+        # Trigger rationale creation via the LLM extractor.
+        self.m.update_history_msg("look", "I see a cup on the table")
+        llm = MockLLM(
+            default_response='{"evidence": "cup on table", "related_area": "kitchen", "related_obj": "cup"}'
+        )
+        self.m._llm_extractor = llm  # noqa: SLF001 — test wiring
+        self.m.extract_and_update_rationale_list("00:00:05-00:00:10")
 
-    def test_write_appends_rationale(self):
-        ok = self.m.write(MemoryEntry(
-            "r3", "evidence",
-            metadata={"related_area": "a", "related_period": "00:00:25-00:00:30"}
-        ), MemoryContext())
-        self.assertTrue(ok)
-        self.assertEqual(self.m.get_rationale_count(), 3)
+    def test_rationale_persisted_to_storage(self):
+        node = self.m.graph_storage.get_node("rationale-0")
+        self.assertIsNotNone(node)
+        self.assertIn(MemorySlot.WM.value, node["labels"])
+        self.assertIn("Rationale", node["labels"])
 
-    def test_read_returns_all_when_no_filter(self):
-        result = self.m.read(QueryBuilder().build())
-        self.assertEqual(len(result.entries), 2)
+    def test_rationale_has_time_index_attached(self):
+        """CLiViS period anchors rationales to TimeIndex nodes."""
+        neighbours = self.m.graph_storage.get_neighbors(
+            "rationale-0", "AT_TIME", "out"
+        )
+        self.assertEqual(len(neighbours), 1)
+        ti_node = self.m.graph_storage.get_node(neighbours[0][0])
+        self.assertIsNotNone(ti_node)
+        self.assertIn("TimeIndex", ti_node["labels"])
+        self.assertEqual(
+            ti_node["properties"]["period"], "00:00:05-00:00:10"
+        )
 
-    def test_read_filters_by_semantic(self):
-        # AND semantics: kitchen AND cup → only r1
-        result = self.m.read(QueryBuilder().with_semantic("kitchen", "cup").build())
-        self.assertEqual(len(result.entries), 1)
-        self.assertEqual(result.entries[0].entry_id, "rationale-0")
-
-    def test_get_timeline_filters_by_time(self):
-        # r1 has midpoint 7.5s; r2 has midpoint 17.5s
-        timeline = self.m.get_timeline(t_min=10, t_max=20)
-        self.assertEqual({e.entry_id for e in timeline}, {"rationale-1"})
+    def test_stats_track_rationale_count(self):
+        s = self.m.stats()
+        self.assertEqual(s["count"], 1)
+        self.assertTrue(s["has_question"])
 
     def test_output_memory_info_serialises_rationales(self):
         text = self.m.output_memory_info()
@@ -146,7 +133,7 @@ class TestTimeWorkingMemoryReadWrite(unittest.TestCase):
         self.assertIn("cup on table", text)
         self.assertIn("kitchen", text)
 
-    def test_clear(self):
+    def test_clear_resets_state(self):
         self.m.clear()
         self.assertEqual(self.m.stats()["count"], 0)
         self.assertEqual(self.m.question, "")

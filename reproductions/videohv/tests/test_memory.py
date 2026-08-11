@@ -1,4 +1,4 @@
-"""Tests for VideoHV synthesised memory modules."""
+"""Tests for VideoHV synthesised memory modules (storage-backed)."""
 from __future__ import annotations
 
 import unittest
@@ -7,8 +7,9 @@ from reproductions.videohv.memory.time_verification_trace import VerificationTra
 from reproductions.videohv.memory.video_summary_memory import VideoSummaryMemory
 from unimem.core.context import MemoryContext
 from unimem.core.entry import MemoryEntry
+from unimem.core.module import MemoryModule
 from unimem.core.query import QueryBuilder
-from unimem.core.slot_abc import EpisodicMemoryABC
+from unimem.core.slots import MemorySlot
 
 
 class TestVideoSummaryMemory(unittest.TestCase):
@@ -27,8 +28,10 @@ class TestVideoSummaryMemory(unittest.TestCase):
             clip_boundaries=[(0.0, 5.0), (5.0, 10.0), (10.0, 15.0)],
         )
 
-    def test_is_episodic(self):
-        self.assertIsInstance(self.mem, EpisodicMemoryABC)
+    def test_is_memory_module(self):
+        # No longer EpisodicMemoryABC — just a plain MemoryModule subclass.
+        self.assertIsInstance(self.mem, MemoryModule)
+        self.assertEqual(self.mem.slot, MemorySlot.EM)
 
     def test_ingest_count(self):
         self.assertEqual(self.mem.stats()["count"], 3)
@@ -51,15 +54,12 @@ class TestVideoSummaryMemory(unittest.TestCase):
         self.assertEqual(starts, sorted(starts))
 
     def test_get_timeline_temporal_filter(self):
-        # Should return only clips overlapping [6, 11]
         timeline = self.mem.get_timeline(6.0, 11.0)
         self.assertEqual({e.entry_id for e in timeline}, {"clip-1", "clip-2"})
 
     def test_read_by_semantic_object_tag(self):
-        # All clips feature "person"
         result = self.mem.read(QueryBuilder().with_semantic("person").build())
         self.assertEqual(len(result.entries), 3)
-        # Only clip 0 has "fridge"
         result = self.mem.read(QueryBuilder().with_semantic("fridge").build())
         self.assertEqual(len(result.entries), 1)
         self.assertEqual(result.entries[0].entry_id, "clip-0")
@@ -69,7 +69,6 @@ class TestVideoSummaryMemory(unittest.TestCase):
         self.assertEqual(len(result.entries), 1)
 
     def test_read_combined_axes(self):
-        # person AND fridge in [0, 5]
         result = self.mem.read(
             QueryBuilder()
             .with_semantic("person", "fridge")
@@ -85,7 +84,6 @@ class TestVideoSummaryMemory(unittest.TestCase):
     def test_stats_top_tags(self):
         s = self.mem.stats()
         self.assertIn("top_tags", s)
-        # Person appears 3 times
         top = dict(s["top_tags"])
         self.assertEqual(top.get("person"), 3)
 
@@ -113,6 +111,34 @@ class TestVideoSummaryWriteViaEntry(unittest.TestCase):
         self.assertEqual(len(result.entries), 1)
 
 
+class TestVideoSummaryStorage(unittest.TestCase):
+    def setUp(self):
+        self.mem = VideoSummaryMemory(
+            action_captions=["a", "b"],
+            object_detections=[[], []],
+            clip_boundaries=[(0.0, 1.0), (1.0, 2.0)],
+        )
+
+    def test_clip_nodes_persisted_with_labels(self):
+        node = self.mem.graph_storage.get_node("clip-0")
+        self.assertIsNotNone(node)
+        self.assertIn(MemorySlot.EM.value, node["labels"])
+        self.assertIn("VideoClip", node["labels"])
+
+    def test_time_index_attached_per_clip(self):
+        neighbours = self.mem.graph_storage.get_neighbors("clip-0", "AT_TIME", "out")
+        self.assertEqual(len(neighbours), 1)
+        ti = self.mem.graph_storage.get_node(neighbours[0][0])
+        self.assertEqual(ti["properties"]["clip_index"], 0)
+        self.assertEqual(ti["properties"]["start_t"], 0.0)
+        self.assertEqual(ti["properties"]["end_t"], 1.0)
+
+    def test_query_by_clip_index_via_storage(self):
+        # Native Cypher-style query at the storage level.
+        results = self.mem.graph_storage.get_time_indexed_nodes(clip_index=1)
+        self.assertEqual([e.entry_id for e in results], ["clip-1"])
+
+
 class TestVerificationTraceMemory(unittest.TestCase):
     def test_record_and_get_round(self):
         tm = VerificationTraceMemory()
@@ -138,8 +164,8 @@ class TestVerificationTraceMemory(unittest.TestCase):
         rounds[0]["clue"] = "modified"
         self.assertEqual(tm.get_round(0)["clue"], "a")
 
-    def test_is_episodic(self):
-        self.assertIsInstance(VerificationTraceMemory(), EpisodicMemoryABC)
+    def test_is_memory_module(self):
+        self.assertIsInstance(VerificationTraceMemory(), MemoryModule)
 
     def test_get_timeline_filters_by_round(self):
         tm = VerificationTraceMemory()
@@ -152,9 +178,7 @@ class TestVerificationTraceMemory(unittest.TestCase):
         tm = VerificationTraceMemory()
         tm.record_round(0, verdict="verified")
         tm.record_round(1, verdict="not_verified")
-        # 'verified' is both a meta-tag and the verdict text on round 0
         result = tm.read(QueryBuilder().with_semantic("verified").build())
-        # Round 0 has verdict='verified' which adds it to sem keys
         ids = {e.entry_id for e in result.entries}
         self.assertIn("trace-round-0", ids)
 
@@ -178,6 +202,17 @@ class TestVerificationTraceMemory(unittest.TestCase):
         r = tm.get_round(5)
         self.assertIsNotNone(r)
         self.assertEqual(r["clue"], "test clue")
+
+
+class TestTraceStorage(unittest.TestCase):
+    def test_trace_nodes_have_time_index(self):
+        tm = VerificationTraceMemory()
+        tm.record_round(0, clue="first")
+        tm.record_round(1, clue="second")
+        neighbours = tm.graph_storage.get_neighbors("trace-round-1", "AT_TIME", "out")
+        self.assertEqual(len(neighbours), 1)
+        ti = tm.graph_storage.get_node(neighbours[0][0])
+        self.assertEqual(ti["properties"]["timestamp"], 1.0)
 
 
 if __name__ == "__main__":

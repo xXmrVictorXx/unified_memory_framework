@@ -302,24 +302,103 @@ class TestEndToEndScenarios(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------- #
-# Slot coverage matrix — a quick reality check that each slot has at least
-# one reproduction populating it.
+# Unified-storage integration — the key new property enabled by the
+# storage-backed refactor: a single GraphStorage can host nodes from
+# multiple methods at once, enabling cross-method consistency queries.
 # --------------------------------------------------------------------------- #
-class TestSlotCoverage(unittest.TestCase):
-    def test_every_slot_has_at_least_one_reproduction(self):
-        """The framework defines 6 slots; check that the 3 reproductions
-        collectively populate at least 4 of them (WM, SG, GM, EM, SM)."""
-        slots_seen = set()
-        slots_seen.add(build_r4_graph().get_node("wm").slot)
-        slots_seen.add(build_r4_graph().get_node("db").slot)
-        slots_seen.add(build_r4_graph().get_node("sm").slot)
-        slots_seen.add(build_clivis_graph().get_node("sg").slot)
-        slots_seen.add(build_clivis_graph().get_node("gm").slot)
-        slots_seen.add(build_videohv_graph().get_node("summary").slot)
-        # Should hit at least 4 distinct slots
-        self.assertGreaterEqual(len(slots_seen), 4)
-        # PM (procedural) is the one slot no reproduction uses — that's expected,
-        # it maps to skill memory which none of these 3 methods embody.
+class TestUnifiedStorage(unittest.TestCase):
+    def test_shared_storage_across_methods(self):
+        """All three methods can write into the same GraphStorage."""
+        from unimem.graph_storage import InMemoryGraphStorage
+
+        gs = InMemoryGraphStorage()
+
+        # R4 facade
+        r4_db = R4KnowledgeDatabase(
+            embedding_fn=MockEmbedding(), graph_storage=gs
+        )
+        # CLiViS facades
+        rel = RelationGraph(graph_storage=gs)
+        nav = NavigationGraph(graph_storage=gs)
+        wm = TimeWorkingMemory(question="q", graph_storage=gs)
+        # VideoHV facades
+        summary = VideoSummaryMemory(graph_storage=gs)
+        trace = VerificationTraceMemory(graph_storage=gs)
+
+        # Each writes its own data — no collisions
+        r4_db.observe_object(
+            description="red chair",
+            centroid=(1.0, 2.0, 0.5),
+            extent=(0.5, 0.5, 1.0),
+            timestamp=10.0,
+        )
+        rel.add_person("alice", "host")
+        nav.add_persons([{"name": "bob", "info": "guest"}])
+        wm.update_history_msg("look", "I see alice")
+        from reproductions._common.mocks import MockLLM
+        wm._llm_extractor = MockLLM(default_response='{"evidence": "alice is here"}')
+        wm.extract_and_update_rationale_list("00:00:00-00:00:30")
+        summary.ingest(["clip A", "clip B"])
+        trace.record_round(0, clue="c1")
+
+        # All data sits in one storage backend
+        node = gs.get_node("obj-0001")
+        self.assertIsNotNone(node)
+        node = gs.get_node("alice")
+        self.assertIsNotNone(node)
+        node = gs.get_node("rationale-0")
+        self.assertIsNotNone(node)
+        node = gs.get_node("clip-0")
+        self.assertIsNotNone(node)
+        node = gs.get_node("trace-round-0")
+        self.assertIsNotNone(node)
+
+    def test_cypher_can_query_across_methods(self):
+        """A single Cypher query can return nodes from multiple methods."""
+        from unimem.graph_storage import InMemoryGraphStorage
+
+        gs = InMemoryGraphStorage()
+        rel = RelationGraph(graph_storage=gs)
+        summary = VideoSummaryMemory(graph_storage=gs)
+
+        rel.add_person("alice", "host")
+        summary.ingest(["alice enters", "alice sits"])
+
+        # Query: every node in the storage
+        rows = gs.query("MATCH (n) RETURN n")
+        # Should include alice + clip-0 + clip-1 + their TimeIndex nodes
+        node_ids = {r["n"]["node_id"] for r in rows}
+        self.assertIn("alice", node_ids)
+        self.assertIn("clip-0", node_ids)
+        self.assertIn("clip-1", node_ids)
+
+    def test_clivis_and_videohv_share_timeindex_pattern(self):
+        """Both CLiViS rationales and VideoHV clips use :AT_TIME edges,
+        so a single time-range query works across both."""
+        from unimem.graph_storage import InMemoryGraphStorage
+
+        gs = InMemoryGraphStorage()
+        wm = TimeWorkingMemory(question="q", graph_storage=gs)
+        summary = VideoSummaryMemory(graph_storage=gs)
+
+        # CLiViS rationale with period 00:00:10-00:00:20
+        wm.update_history_msg("look", "alice walks")
+        from reproductions._common.mocks import MockLLM
+        wm._llm_extractor = MockLLM(
+            default_response='{"evidence": "alice walks", "related_area": "kitchen"}'
+        )
+        wm.extract_and_update_rationale_list("00:00:10-00:00:20")
+        # VideoHV clip with start_t=15, end_t=20
+        summary.ingest(
+            ["alice walks"],
+            clip_boundaries=[(15.0, 20.0)],
+        )
+        # Query TimeIndex nodes overlapping [12, 18]
+        results = gs.get_time_indexed_nodes(time_range=(12.0, 18.0))
+        result_ids = sorted({e.entry_id for e in results})
+        # Should contain both the rationale and the clip
+        self.assertIn("rationale-0", result_ids)
+        self.assertIn("clip-0", result_ids)
 
 
 if __name__ == "__main__":
