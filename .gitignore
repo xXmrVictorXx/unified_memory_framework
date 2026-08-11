@@ -57,3 +57,9 @@ logs/
 # contains upstream git repos that should not be tracked here).
 # See README.md → "项目结构" for what lives where.
 reproduce/
+
+# Real-data run artifacts (segmented videos, model output caches, etc.)
+tmp_*/
+tmp_segments/
+*.mp4
+
