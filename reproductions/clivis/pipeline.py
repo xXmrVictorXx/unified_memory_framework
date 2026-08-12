@@ -56,6 +56,14 @@ class CLiViSResult:
     final_subgraph_text: str
     final_memory_text: str
     history: List[Dict[str, str]] = field(default_factory=list)
+    # When a shared GraphStorage is injected via CLiViSPipeline(graph_storage=...),
+    # this field exposes references to the three memory modules after run() so
+    # the caller can inspect / query them. When no storage is injected, the
+    # modules live only inside run() and aren't exposed here (their data is
+    # lost when the process exits).
+    navigation_graph: Optional[Any] = None
+    relation_graph: Optional[Any] = None
+    working_memory: Optional[Any] = None
 
 
 # --------------------------------------------------------------------------- #
@@ -72,10 +80,30 @@ class CLiViSPipeline:
         llm: LLMFn,
         vlm: VLMFn,
         max_rounds: int = 15,
+        graph_storage: Optional[Any] = None,
     ) -> None:
+        """Construct the pipeline.
+
+        Parameters
+        ----------
+        llm, vlm:
+            Callables matching ``LLMFn`` / ``VLMFn``.
+        max_rounds:
+            Cap on iterative LLM-VLM refinement.
+        graph_storage:
+            Optional :class:`~unimem.graph_storage.base.GraphStorage` to
+            back the three memory modules (NavigationGraph, RelationGraph,
+            TimeWorkingMemory). When provided, **the same storage instance
+            is shared by all three modules** — meaning their nodes are
+            queryable together via Cypher after ``run()`` returns. When
+            ``None``, each module gets its own fresh
+            :class:`~unimem.graph_storage.InMemoryGraphStorage` (the
+            pre-existing behaviour; data does not survive process exit).
+        """
         self.llm = llm
         self.vlm = vlm
         self.max_rounds = int(max_rounds)
+        self._graph_storage = graph_storage
 
     # ------------------------------------------------------------------ #
     # Public entry point
@@ -87,11 +115,26 @@ class CLiViSPipeline:
         full_video_segment: Optional[str] = None,
     ) -> CLiViSResult:
         # ---- Phase 1: Initialise Cognitive Map ----
-        nav = NavigationGraph(
-            period_description_dict={p.name: p.description for p in periods}
-        )
-        rel = RelationGraph()
-        wm = TimeWorkingMemory(question=question, llm_extractor=self.llm)
+        # When a shared storage is injected, all three modules persist into
+        # the same backend (e.g. Neo4j); when None, each gets its own
+        # in-memory storage (the historical behaviour).
+        if self._graph_storage is not None:
+            nav = NavigationGraph(
+                period_description_dict={p.name: p.description for p in periods},
+                graph_storage=self._graph_storage,
+            )
+            rel = RelationGraph(graph_storage=self._graph_storage)
+            wm = TimeWorkingMemory(
+                question=question,
+                llm_extractor=self.llm,
+                graph_storage=self._graph_storage,
+            )
+        else:
+            nav = NavigationGraph(
+                period_description_dict={p.name: p.description for p in periods}
+            )
+            rel = RelationGraph()
+            wm = TimeWorkingMemory(question=question, llm_extractor=self.llm)
         for p in periods:
             if p.segment_file:
                 nav.register_video_segment(p.name, p.segment_file)
@@ -134,6 +177,9 @@ class CLiViSPipeline:
                     final_subgraph_text=subgraph_text,
                     final_memory_text=memory_text,
                     history=list(wm.history_messages),
+                    navigation_graph=nav,
+                    relation_graph=rel,
+                    working_memory=wm,
                 )
 
             # Parse instruction (period, instruction_text)
@@ -171,6 +217,9 @@ class CLiViSPipeline:
             final_subgraph_text=subgraph_text,
             final_memory_text=memory_text,
             history=list(wm.history_messages),
+            navigation_graph=nav,
+            relation_graph=rel,
+            working_memory=wm,
         )
 
     # ------------------------------------------------------------------ #

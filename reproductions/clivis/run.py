@@ -86,6 +86,28 @@ def main() -> int:
         "--model-path", default=None,
         help="Override Qwen2.5-VL model path (default: /mnt/my_hub2/models/...)",
     )
+    parser.add_argument(
+        "--backend", choices=["memory", "neo4j"], default="memory",
+        help="GraphStorage backend. 'memory' (default) = in-process, lost on "
+             "exit. 'neo4j' = persistent Neo4j at bolt://localhost:7687.",
+    )
+    parser.add_argument(
+        "--neo4j-uri", default="bolt://localhost:7687",
+        help="Neo4j Bolt URI (only used with --backend neo4j)",
+    )
+    parser.add_argument(
+        "--neo4j-user", default="neo4j",
+        help="Neo4j username (only used with --backend neo4j)",
+    )
+    parser.add_argument(
+        "--neo4j-password", default="password",
+        help="Neo4j password (only used with --backend neo4j)",
+    )
+    parser.add_argument(
+        "--clear-storage", action="store_true",
+        help="Clear the GraphStorage before running (Neo4j: wipe all nodes; "
+             "memory: no-op since it always starts empty).",
+    )
     args = parser.parse_args()
 
     # ---- 0. Sanity --------------------------------------------------- #
@@ -123,10 +145,29 @@ def main() -> int:
     # ---- 4. Build & run the pipeline --------------------------------- #
     print(f"\n[pipeline] question: {args.question!r}")
     print(f"[pipeline] max_rounds={args.max_rounds}")
+
+    graph_storage = None
+    if args.backend == "neo4j":
+        from unimem.graph_storage.neo4j_backend import Neo4jGraphStorage
+        print(f"[storage] Neo4j at {args.neo4j_uri}")
+        graph_storage = Neo4jGraphStorage(
+            uri=args.neo4j_uri,
+            user=args.neo4j_user,
+            password=args.neo4j_password,
+            clear_on_init=args.clear_storage,
+        )
+        rows = graph_storage.query("MATCH (n) RETURN count(n) AS c")
+        print(f"[storage] connected; {rows[0]['c']} nodes pre-existing")
+    else:
+        from unimem.graph_storage import InMemoryGraphStorage
+        graph_storage = InMemoryGraphStorage()
+        print("[storage] InMemoryGraphStorage (no persistence)")
+
     pipe = CLiViSPipeline(
         llm=runner.llm,
         vlm=runner.vlm,
         max_rounds=args.max_rounds,
+        graph_storage=graph_storage,
     )
     t0 = time.time()
     result = pipe.run(args.question, periods, full_video_segment=video_abs)
@@ -148,6 +189,22 @@ def main() -> int:
     for h in result.history:
         content = h["content"][:160].replace("\n", " ")
         print(f"  [{h['role']}] {content}{'...' if len(h['content']) > 160 else ''}")
+
+    # ---- 6. Storage summary ------------------------------------------ #
+    print("\n--- GraphStorage summary ---")
+    rows = graph_storage.query("MATCH (n) RETURN count(n) AS c")
+    n_nodes = rows[0]["c"]
+    rows = graph_storage.query("MATCH ()-[r]->() RETURN count(r) AS c")
+    n_edges = rows[0]["c"]
+    print(f"Total: {n_nodes} nodes, {n_edges} edges")
+    if args.backend == "neo4j":
+        print(f"\nNeo4j Browser:  http://localhost:7474  "
+              f"(user={args.neo4j_user}, password={args.neo4j_password})")
+        print("Try Cypher in browser:")
+        print('  MATCH (n) RETURN n                         -- all nodes')
+        print('  MATCH (n:Person) RETURN n                  -- all Person nodes')
+        print('  MATCH (a)-[r:PERFORMS]->(b) RETURN a, r, b -- action relations')
+        print('  MATCH (n:TimeIndex) RETURN n               -- time anchors')
     return 0
 
 
