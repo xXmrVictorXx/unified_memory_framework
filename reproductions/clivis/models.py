@@ -125,27 +125,36 @@ class QwenRunner:
         max_new_tokens: int = 256,
     ) -> str:
         """``images`` follows the CLiViS pipeline convention: a list whose
-        first non-None element is a path (or file:// URL) to a video segment.
+        first non-None element is a path (or file:// URL) to a video segment
+        OR a single-frame image (``.jpg`` / ``.png`` / ``.jpeg``).
+
+        The file type is detected from the extension: image files are sent
+        as ``{"type": "image"}`` while everything else (``.mp4`` etc.) is
+        sent as ``{"type": "video"}`` with the configured ``fps``.
         """
         import torch
         from qwen_vl_utils import process_vision_info
 
-        video_path: Optional[str] = None
+        media_path: Optional[str] = None
         if images:
             for item in images:
                 if item:
-                    video_path = str(item)
+                    media_path = str(item)
                     break
 
         content: List[dict] = []
-        if video_path:
-            url = video_path if video_path.startswith("file://") else f"file://{video_path}"
-            content.append({
-                "type": "video",
-                "video": url,
-                "fps": self._video_fps,
-                "max_pixels": self._max_pixels,
-            })
+        if media_path:
+            url = media_path if media_path.startswith("file://") else f"file://{media_path}"
+            stripped = media_path.split("://")[-1].lower()
+            if stripped.endswith((".jpg", ".jpeg", ".png", ".webp", ".bmp")):
+                content.append({"type": "image", "image": url})
+            else:
+                content.append({
+                    "type": "video",
+                    "video": url,
+                    "fps": self._video_fps,
+                    "max_pixels": self._max_pixels,
+                })
         content.append({"type": "text", "text": prompt})
 
         messages = [{"role": "user", "content": content}]
