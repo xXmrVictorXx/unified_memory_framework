@@ -37,7 +37,7 @@
   - `DedupPolicy` 实现 R4 Eq.5（向量 + 空间双阈值去重）
   - 三复现方法（R4 / CLiViS / VideoHV）全部重写为 storage-backed facade，删除子类化
   - 节点 label 约定：`MemorySlot.value` + 自定义子标签 + `:TimeIndex` + `:AT_TIME`
-  - 434 测试全过（unimem core 182 + graph_storage 40 + vector_storage 22 + reproductions 190）
+  - 451 测试全过（unimem core 182 + graph_storage 57 + vector_storage 22 + reproductions 190）
 - 🔄 当前：将框架映射到记忆修正应用；分析每层在具体方法中的功能
 - ⏳ 下一步：定义修正模块接口；选择实验测试床（OpenEQA / HM3D / Habitat）；
   形式化错误类型学
@@ -84,7 +84,7 @@
 - **测试用 `unittest`**（不用 pytest）
 - **运行测试**：
   - `cd /home/eg4/pwttt/cdx && python -m unittest discover -s unimem/tests -v`（核心，182）
-  - `cd /home/eg4/pwttt/cdx && python -m unittest discover -s unimem/graph_storage/tests -v`（40）
+  - `cd /home/eg4/pwttt/cdx && python -m unittest discover -s unimem/graph_storage/tests -v`（57）
   - `cd /home/eg4/pwttt/cdx && python -m unittest discover -s unimem/vector_storage/tests -v`（22）
   - `cd /home/eg4/pwttt/cdx && python -m unittest discover -s reproductions -v`（190）
 
@@ -117,6 +117,21 @@
 4. **`MultiAxisIndex` 是工具非强制**：场景图等模块可有自己的树结构
 5. **单一 Registry 按 `(slot, impl_name)`**：`list_implementations(slot)` 查询
 6. **`GraphSpec` dataclass + `from_dict`**：dataclass 便于 IDE，dict 便于 JSON/YAML 加载
+
+## `reproductions/` — 统一 LLM/VLM 接口（`llm.py`）
+
+`reproductions/llm.py` 是复现包中**唯一** import `transformers` / `torch` 的文件。
+三种复现方法的模型加载与 LLM/VLM 调用全部集中于此；旧 `clivis/models.py`、`r4/models.py`、
+`videohv/models.py` 已删除，内容合并到 `llm.py`。
+
+| 符号 | 说明 |
+|------|------|
+| `QwenRunner` | 加载 Qwen3-VL / Qwen2.5-VL（4-bit），暴露 `.llm()` + `.vlm()` |
+| `QwenVisionTools` | VideoHV `.caption()/.detect()/.track()` 合同 |
+| `make_structured_llm(runner)` | VideoHV hypothesis 输出正则归一化（`<0>:`→`0:`） |
+| `make_vlm_decomposer(llm)` | R4 问题分解为 k_sem / k_spa / k_t 检索轴 |
+| `make_embedding_fn()` | BGE-m3 sentence embedder（R4 SEM 轴） |
+| `safe_json_extract` / `extract_balanced` | JSON 解析工具（去重，原在 3 文件重复） |
 
 ## 关键设计原则（修正研究方向）
 

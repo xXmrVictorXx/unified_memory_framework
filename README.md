@@ -26,6 +26,7 @@ unified_memory_framework/
 │
 ├── reproductions/     # 三种已有方法实现与重构
     ├── _common/       # Mock
+    ├── llm.py         # 统一 LLM/VLM 接口（唯一 import transformers/torch）
     ├── r4/            # R^4 (arXiv 2512.15940) — 4D知识库
     ├── clivis/        # CLiViS (CVPR 2026) — 三种模块记忆+迭代修正
     ├── videohv/       # VideoHV-Agent (CVPR 2026) — 图像注释->隐式记忆
@@ -38,20 +39,26 @@ unified_memory_framework/
 
 - **问题**：VLA/EQA 智能体运行中累积记忆错误——幻觉对象、位置漂移、信息过时、关系错误、语义误分类、合并/沉淀引入的假事实——导致问答与导航精度下降。
 - **差距**：现有方法只有**预防性**机制（写入门控、单次 VLM 验证），无系统性**纠正性**机制；各方法记忆彼此孤立、表征各异，无法跨方法纠错。
-- **方法**：实现了统一的多模块记忆框架（WM / SG / GM / EM / SM / PM），支持：
-  1. **多模块一致性校验**——处理不同模块记忆交互（如 SG 的"杯子在桌上" vs GM 的桌面几何）
+- **方法（待实现）**：统一的多模块记忆框架，支持：
+  1. **多模块一致性校验**——处理不同模块记忆交互（如场景图记忆的"杯子在桌上"与几何映射的桌面几何）
   2. **即插即用的记忆修正模块**——通过统一接口适配不同 VLA/EQA 架构
   3. **跨方法记忆对比**——集成式错误检测（场景图法 vs 地图法 对同一环境的记忆差异）
 
 ---
 
-## `unimem/` — 通用记忆框架
+## `unimem/` — 统一记忆框架
 
 纯Python标准库实现，无第三方依赖。详细文档见 [unimem/README.md](unimem/README.md)（设计原则、关键决策、API 速查）。
 
 ### 核心设计
 
-- **6种记忆槽位**（`MemorySlot`）：`WM` / `SG` / `GM` / `EM` / `SM` / `PM`
+- **6种记忆槽位**（`MemorySlot`），每种记忆槽位代表一种记忆类型：
+  1. 工作记忆（Working Memory, `WM`）— 当前观测、任务状态、近期上下文
+  2. 场景图（Scene Graph, `SG`）— 层次化的对象-关系图结构表示
+  3. 空间几何（Spatial Geometric Memory, `SG`）— 栅格图、占用图、导航图
+  4. 情景记忆（Episodic Memory, `EM`）— 时序事件、历史观测序列
+  5. 语义记忆（Semantic Memory, `SM`）— 事实、规则、常识等文字信息
+  6. 程序记忆（Procedural Memory, `PM`）— 动作策略等
 - **模块即图节点**：每个 `MemoryModule` 实例是图中一个节点；数据流/沉淀/索引是边
 - **5种关系边**（`EdgeKind`）：`FEEDS`（数据流）/ `CONSOLIDATES_TO`（沉淀）/ `INDEXES` / `REFERENCES` / `SUBSUMES`（层级）
 - **3个核心图算法**（`MemoryGraph`）：
@@ -94,15 +101,17 @@ unified_memory_framework/
 ```bash
 cd /home/eg4/pwttt/cdx
 
-# 仅 unimem 框架（149 测试）
+# unimem 框架核心（182 测试）
 python -m unittest discover -s unimem/tests -v
 
-# 仅 reproductions（177 测试）
+# graph_storage + vector_storage（79 测试）
+python -m unittest discover -s unimem/graph_storage/tests -v
+python -m unittest discover -s unimem/vector_storage/tests -v
+
+# reproductions（190 测试）
 python -m unittest discover -s reproductions -v
 
-# 全部（326 测试，~0.02 秒）
-python -m unittest discover -s unimem/tests -t . && \
-python -m unittest discover -s reproductions -t .
+# 全部（451 测试，~0.03 秒）
 ```
 
 ### 最小示例：构建一个 unimem 图
@@ -132,18 +141,30 @@ g.write(
 
 ### 接入真实模型
 
-把 `MockLLM` 替换为任何 `(prompt: str, **kw) -> str` 的可调用对象即可：
+`reproductions/llm.py` 是唯一的 LLM/VLM 接口文件（集中 import transformers/torch），
+提供三种方法共享的模型加载与适配器：
 
 ```python
-from my_real_client import real_llm, real_vlm
-from reproductions.r4.pipeline import R4Pipeline
-from reproductions.r4.memory.knowledge_db import R4KnowledgeDatabase
+from reproductions.llm import (
+    QwenRunner,            # 模型加载 + .llm() / .vlm()
+    QwenVisionTools,       # VideoHV 的 .caption()/.detect()/.track()
+    make_structured_llm,   # VideoHV hypothesis 输出归一化
+    make_vlm_decomposer,   # R4 问题分解为检索轴
+    make_embedding_fn,     # BGE-m3 sentence embedder
+)
 
-db = R4KnowledgeDatabase(vlm_describe=real_vlm)
-pipe = R4Pipeline(db=db, vlm=real_vlm)
+runner = QwenRunner()  # 默认 Qwen3-VL-8B-Instruct, 4-bit
+# CLiViS
+pipe = CLiViSPipeline(llm=runner.llm, vlm=runner.vlm, ...)
+# R4
+pipe = R4Pipeline(db=db, vlm=runner.vlm,
+                  decomposer=make_vlm_decomposer(runner.llm))
+# VideoHV
+pipe = VideoHVPipeline(llm=make_structured_llm(runner),
+                       vision_tools=QwenVisionTools(runner), ...)
 ```
 
-CLiViS 的 LLM/VLM、R4 的 embedding、VideoHV 的 vision-tools 同理可替换。
+单元测试用 `MockLLM` / `MockVLM`（`reproductions/_common/mocks.py`），无需 GPU。
 
 ---
 
@@ -166,8 +187,8 @@ CLiViS 的 LLM/VLM、R4 的 embedding、VideoHV 的 vision-tools 同理可替换
 
 - ✅ 文献调研（~55 篇，2025-2026 多记忆融合为主）
 - ✅ 通用记忆框架 v2 设计（6 槽位 + 3 横切机制）
-- ✅ 框架骨架实现：`unimem/` 包（纯 stdlib，149 测试全过）
-- ✅ 三种真实方法复现：`reproductions/`（177 测试，零第三方依赖）
+- ✅ 框架骨架实现：`unimem/` 包 v0.2（storage-backed，核心纯 stdlib，261 测试）
+- ✅ 三种真实方法复现 + 统一 LLM 接口：`reproductions/`（190 测试 + 实机烟测）
 - 🔄 当前：将框架映射到记忆修正应用；分析每层在具体方法中的功能
 - ⏳ 下一步：定义修正模块接口；选择实验测试床（OpenEQA / HM3D / Habitat）；形式化错误类型学
 
@@ -177,9 +198,9 @@ CLiViS 的 LLM/VLM、R4 的 embedding、VideoHV 的 vision-tools 同理可替换
 
 - **语言**：中文为主，技术术语保留英文
 - **方法学**：文献驱动；任何框架/机制设计需有论文支撑（可在 `papers_matrix.md` 追溯）
-- **范围**：以 EQA 为主要测试域（有明确 QA 正确性信号便于评估修正效果），向 VLA 通用化
+- **范围**：目前主要面向EQA方法，可能向VLA泛化
 - **代码**：避免过度工程化；不为假设性未来需求设计；不添加未被请求的 docstring/类型注解/特征
-- **依赖**：`unimem/` 纯 stdlib 硬约束；`reproductions/` 同样零硬依赖（neo4j/numpy/torch 均用 stdlib 替代）
-- **Python**：3.9+ 兼容（`from __future__ import annotations`，无 `X | Y` 运行时注解）
+- **依赖**：neo4j, numpy, torch, transformers等
+- **Python**：3.9+
 
 更多详细工作指示见 [CLAUDE.md](CLAUDE.md)。
