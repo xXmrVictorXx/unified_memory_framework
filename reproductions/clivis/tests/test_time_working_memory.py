@@ -8,8 +8,8 @@ from reproductions.clivis.memory.time_working_memory import (
     Rationale,
     TimeWorkingMemory,
     _period_to_seconds,
-    _safe_json_extract,
 )
+from reproductions.llm import safe_json_extract
 from unimem.core.entry import MemoryEntry
 from unimem.core.slots import MemorySlot
 from unimem.graph_storage import InMemoryGraphStorage
@@ -33,18 +33,18 @@ class TestPeriodParsing(unittest.TestCase):
 
 class TestSafeJsonExtract(unittest.TestCase):
     def test_direct_json(self):
-        self.assertEqual(_safe_json_extract('{"a": 1}'), {"a": 1})
+        self.assertEqual(safe_json_extract('{"a": 1}'), {"a": 1})
 
     def test_json_in_text(self):
-        self.assertEqual(_safe_json_extract('ok {"a": 1} done'), {"a": 1})
+        self.assertEqual(safe_json_extract('ok {"a": 1} done'), {"a": 1})
 
     def test_fenced_json(self):
         text = '```json\n{"a": 1}\n```'
-        self.assertEqual(_safe_json_extract(text), {"a": 1})
+        self.assertEqual(safe_json_extract(text), {"a": 1})
 
     def test_invalid_returns_none(self):
-        self.assertIsNone(_safe_json_extract("not json at all"))
-        self.assertIsNone(_safe_json_extract(""))
+        self.assertIsNone(safe_json_extract("not json at all"))
+        self.assertIsNone(safe_json_extract(""))
 
 
 class TestTimeWorkingMemoryBasic(unittest.TestCase):

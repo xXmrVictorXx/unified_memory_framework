@@ -10,5 +10,5 @@ from reproductions.clivis.memory.time_working_memory import (
     Rationale,
     TimeWorkingMemory,
     _period_to_seconds,
-    _safe_json_extract,
 )
+from reproductions.llm import safe_json_extract

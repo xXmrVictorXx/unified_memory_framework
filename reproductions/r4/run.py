@@ -35,7 +35,7 @@ if _DAM2_PATH.exists():
     sys.path.insert(0, str(_DAM2_PATH))
 
 from reproductions.r4.memory.knowledge_db import R4KnowledgeDatabase  # noqa: E402
-from reproductions.r4.models import QwenRunner, make_vlm_decomposer  # noqa: E402
+from reproductions.llm import QwenRunner, make_embedding_fn, make_vlm_decomposer  # noqa: E402
 from reproductions.r4.perception import CameraIntrinsics, Perceiver  # noqa: E402
 from reproductions.r4.pipeline import Observation, R4Pipeline  # noqa: E402
 
@@ -61,51 +61,11 @@ def _make_db(
 
     vs = InMemoryVectorStorage()
     db = R4KnowledgeDatabase(
-        embedding_fn=_make_embedding_fn(runner),
+        embedding_fn=make_embedding_fn(),
         graph_storage=gs,
         vector_storage=vs,
     )
     return db, gs
-
-
-def _make_embedding_fn(runner: QwenRunner):
-    """Build the SEM-axis embedder using a real sentence-transformer model.
-
-    Uses BGE-m3 (1024-dim, multilingual, stored locally at
-    ``~/.cache/modelscope/hub/models/BAAI/bge-m3``). Loaded once and cached
-    on the first call.
-
-    Falls back to a hash-based pseudo-embedder only if sentence-transformers
-    or the model are unavailable (e.g. on a CI machine without the model).
-    """
-    model_path = "/home/eg4/.cache/modelscope/hub/models/BAAI/bge-m3"
-    try:
-        from sentence_transformers import SentenceTransformer
-        st = SentenceTransformer(model_path)
-        # Warm up so the first real call doesn't pay the model-load cost.
-        st.encode(["warmup"])
-        print(f"[embedder] BGE-m3 loaded from {model_path} (dim={st.get_sentence_embedding_dimension()})")
-
-        def embed(text: str):
-            return st.encode(text, normalize_embeddings=True).tolist()
-
-        return embed
-    except (ImportError, OSError, Exception) as e:
-        print(f"[embedder] WARNING: BGE-m3 unavailable ({e!r}); falling back to hash")
-        import hashlib
-
-        def embed(text: str):
-            h = hashlib.sha512(text.encode("utf-8")).digest()
-            dim = 64
-            out = []
-            i = 0
-            while len(out) < dim:
-                out.append((h[i % len(h)] / 127.5) - 1.0)
-                i += 1
-            norm = sum(x * x for x in out) ** 0.5 or 1.0
-            return [x / norm for x in out]
-
-        return embed
 
 
 def main() -> int:

@@ -48,7 +48,7 @@ class Perceiver:
     Construction
     ------------
     qwen_runner:
-        A :class:`reproductions.clivis.models.QwenRunner` (or any object
+        A :class:`reproductions.llm.QwenRunner` (or any object
         exposing ``vlm(prompt, images=[path]) -> str``).
     depth_model_path:
         Path to a DAM-v2 safetensors checkpoint (vits/vitb/vitl).
@@ -191,8 +191,7 @@ class Perceiver:
         On parse failure, returns an empty list.
         """
         import json
-        import re
-        from reproductions.clivis.pipeline import _safe_json_extract
+        from reproductions.llm import safe_json_extract
 
         prompt = (
             "List every distinct object visible in this image. "
@@ -214,7 +213,7 @@ class Perceiver:
         except json.JSONDecodeError:
             pass
         # Try fence-stripped or brace-extracted
-        extracted = _safe_json_extract(raw)
+        extracted = safe_json_extract(raw)
         if isinstance(extracted, dict) and "objects" in extracted:
             return list(extracted["objects"])
         if isinstance(extracted, list):

@@ -1,7 +1,7 @@
 """End-to-end real-data runner for the CLiViS reproduction.
 
 Wires together:
-1. :class:`reproductions.clivis.models.QwenRunner` — local Qwen2.5-VL-7B
+1. :class:`reproductions.llm.QwenRunner` — local Qwen2.5-VL-7B
    (4-bit) acting as both LLM and VLM.
 2. :func:`reproductions.clivis.video_utils.split_video_uniform` — moviepy
    segmentation.
@@ -30,7 +30,7 @@ from typing import List
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from reproductions.clivis.models import QwenRunner  # noqa: E402
+from reproductions.llm import QwenRunner  # noqa: E402
 from reproductions.clivis.pipeline import (  # noqa: E402
     CLiViSPipeline,
     PeriodInput,

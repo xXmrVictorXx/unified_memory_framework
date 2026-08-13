@@ -21,11 +21,10 @@ All LLM/VLM calls are injectable. Tests script the conversation via
 """
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+from reproductions.llm import safe_json_extract
 from unimem.core.context import MemoryContext
 
 from .memory.navigation_graph import NavigationGraph
@@ -251,7 +250,7 @@ class CLiViSPipeline:
             f"Periods:\n{joined}"
         )
         raw = self.llm(prompt)
-        parsed = _safe_json_extract(raw)
+        parsed = safe_json_extract(raw)
         if not parsed:
             return
         for p in parsed.get("persons", []):
@@ -306,7 +305,7 @@ class CLiViSPipeline:
             f"VLM response: {vlm_response}"
         )
         raw = self.llm(prompt)
-        parsed = _safe_json_extract(raw)
+        parsed = safe_json_extract(raw)
         if not parsed:
             return
         for o in parsed.get("objects", []):
@@ -412,90 +411,6 @@ class CLiViSPipeline:
             if last.related_obj:
                 names.add(last.related_obj)
         return list(names)
-
-
-def _safe_json_extract(text: str) -> Optional[Dict[str, Any]]:
-    """Robust JSON object extraction from LLM output.
-
-    Handles:
-    * Plain JSON
-    * Markdown-fenced JSON (```json ... ``` or ``` ... ```)
-    * JSON surrounded by prose / leading thoughts
-    * Nested objects / arrays (via brace-counting, not regex)
-    """
-    if not text:
-        return None
-    candidate = text.strip()
-
-    # Direct parse
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
-        pass
-
-    # Strip markdown code fence if present
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL)
-    if fence:
-        try:
-            return json.loads(fence.group(1))
-        except json.JSONDecodeError:
-            candidate = fence.group(1)
-
-    # Brace-counting: find the first balanced {...} substring
-    balanced = _extract_balanced(candidate, "{", "}")
-    if balanced is not None:
-        try:
-            return json.loads(balanced)
-        except json.JSONDecodeError:
-            pass
-    return None
-
-
-def _extract_balanced(s: str, open_ch: str, close_ch: str) -> Optional[str]:
-    """Return the first balanced ``open_ch ... close_ch`` substring of ``s``
-    that appears at the top level (not nested inside a ``[...]`` array).
-
-    For LLM JSON outputs like::
-
-        ```json
-        {                              ← we want this outer {...}
-          "persons": [{"name": "x"}]  ← not this inner {...} inside the array
-        }
-        ```
-    """
-    pos = 0
-    while True:
-        start = s.find(open_ch, pos)
-        if start < 0:
-            return None
-        # Skip braces nested inside an array — we want top-level objects.
-        prefix = s[:start]
-        if prefix.count("[") > prefix.count("]"):
-            pos = start + 1
-            continue
-        depth = 0
-        in_string = False
-        escape = False
-        for i in range(start, len(s)):
-            ch = s[i]
-            if in_string:
-                if escape:
-                    escape = False
-                elif ch == "\\":
-                    escape = True
-                elif ch == '"':
-                    in_string = False
-            else:
-                if ch == '"':
-                    in_string = True
-                elif ch == open_ch:
-                    depth += 1
-                elif ch == close_ch:
-                    depth -= 1
-                    if depth == 0:
-                        return s[start:i + 1]
-        # No matching close after `start`; try the next opening brace.
-        pos = start + 1
 
 
 __all__ = ["CLiViSPipeline", "CLiViSResult", "PeriodInput"]

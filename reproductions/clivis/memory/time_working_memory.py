@@ -11,10 +11,10 @@ Each rationale is stored as a node ``:working_memory:Rationale`` with a
 """
 from __future__ import annotations
 
-import json
 import re
 from typing import Any, Callable, Dict, List, Optional
 
+from reproductions.llm import safe_json_extract
 from unimem.core.context import MemoryContext
 from unimem.core.entry import MemoryEntry
 from unimem.core.module import MemoryModule
@@ -124,7 +124,7 @@ class TimeWorkingMemory(MemoryModule):
             f"Question: {self.question}"
         )
         raw = fn(prompt)
-        parsed = _safe_json_extract(raw)
+        parsed = safe_json_extract(raw)
         if not parsed or not parsed.get("evidence"):
             return None
         rat = Rationale(
@@ -270,69 +270,8 @@ def _period_to_seconds(period: str) -> Optional[float]:
     return sum(seconds) / len(seconds)
 
 
-def _safe_json_extract(text: str) -> Optional[Dict[str, Any]]:
-    """Robust JSON object extraction from LLM output (see pipeline._safe_json_extract)."""
-    if not text:
-        return None
-    candidate = text.strip()
-    try:
-        return json.loads(candidate)
-    except json.JSONDecodeError:
-        pass
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL)
-    if fence:
-        try:
-            return json.loads(fence.group(1))
-        except json.JSONDecodeError:
-            candidate = fence.group(1)
-    balanced = _extract_balanced(candidate, "{", "}")
-    if balanced is not None:
-        try:
-            return json.loads(balanced)
-        except json.JSONDecodeError:
-            pass
-    return None
-
-
-def _extract_balanced(s: str, open_ch: str, close_ch: str) -> Optional[str]:
-    """Return the first top-level balanced ``open_ch ... close_ch`` substring.
-    See pipeline._extract_balanced for details."""
-    pos = 0
-    while True:
-        start = s.find(open_ch, pos)
-        if start < 0:
-            return None
-        prefix = s[:start]
-        if prefix.count("[") > prefix.count("]"):
-            pos = start + 1
-            continue
-        depth = 0
-        in_string = False
-        escape = False
-        for i in range(start, len(s)):
-            ch = s[i]
-            if in_string:
-                if escape:
-                    escape = False
-                elif ch == "\\":
-                    escape = True
-                elif ch == '"':
-                    in_string = False
-            else:
-                if ch == '"':
-                    in_string = True
-                elif ch == open_ch:
-                    depth += 1
-                elif ch == close_ch:
-                    depth -= 1
-                    if depth == 0:
-                        return s[start:i + 1]
-        pos = start + 1
-
-
 __all__ = [
     "Rationale",
     "TimeWorkingMemory",
     "_period_to_seconds",
-    "_safe_json_extract",
 ]
